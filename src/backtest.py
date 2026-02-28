@@ -1,83 +1,132 @@
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+
+from src.critical.rolling_metrics import rolling_susceptibility
+from src.critical.critical_overlay import apply_critical_overlay
 
 
-class Backtest:
+# ============================================================
+# MÉTRICAS
+# ============================================================
 
-    def __init__(
-        self,
+def sharpe_ratio(returns, annualization=252):
+    mean = np.nanmean(returns)
+    std = np.nanstd(returns)
+    if std == 0:
+        return 0.0
+    return (mean / std) * np.sqrt(annualization)
+
+
+def max_drawdown(equity_curve):
+    cumulative_max = np.maximum.accumulate(equity_curve)
+    drawdown = (equity_curve - cumulative_max) / cumulative_max
+    return np.min(drawdown)
+
+
+# ============================================================
+# BACKTEST PRINCIPAL
+# ============================================================
+
+def run_backtest(
+    returns,
+    use_critical_overlay=True,
+    overlay_mode="dynamic_percentile",
+    window=252,
+    percentile=80,
+    hedge_exposure=0.5,
+    plot=True
+):
+
+    returns = np.asarray(returns)
+
+    # --------------------------------------------------------
+    # EQUITY ORIGINAL
+    # --------------------------------------------------------
+
+    equity_original = np.cumprod(1 + returns)
+
+    sharpe_original = sharpe_ratio(returns)
+    mdd_original = max_drawdown(equity_original)
+
+    # --------------------------------------------------------
+    # CRITICAL OVERLAY
+    # --------------------------------------------------------
+
+    if use_critical_overlay:
+
+        chi = rolling_susceptibility(returns, window=window)
+
+        adjusted_returns, hedge = apply_critical_overlay(
+            returns,
+            chi,
+            mode=overlay_mode,
+            window=window,
+            percentile=percentile,
+            hedge_exposure=hedge_exposure
+        )
+
+        equity_overlay = np.cumprod(1 + adjusted_returns)
+
+        sharpe_overlay = sharpe_ratio(adjusted_returns)
+        mdd_overlay = max_drawdown(equity_overlay)
+
+    else:
+        equity_overlay = None
+        sharpe_overlay = None
+        mdd_overlay = None
+        hedge = None
+
+    # --------------------------------------------------------
+    # RESULTADOS
+    # --------------------------------------------------------
+
+    results = {
+        "sharpe_original": sharpe_original,
+        "max_dd_original": mdd_original,
+        "sharpe_overlay": sharpe_overlay,
+        "max_dd_overlay": mdd_overlay,
+    }
+
+    # --------------------------------------------------------
+    # PLOT
+    # --------------------------------------------------------
+
+    if plot:
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(equity_original, label="Original")
+
+        if use_critical_overlay:
+            plt.plot(equity_overlay, label="Critical Overlay")
+
+        plt.legend()
+        plt.title("Equity Curve Comparison")
+        plt.tight_layout()
+        plt.show()
+
+    return results
+
+
+# ============================================================
+# EXECUÇÃO DIRETA (TESTE)
+# ============================================================
+
+if __name__ == "__main__":
+
+    # Simulação dummy
+    np.random.seed(42)
+    returns = np.random.normal(0.0005, 0.01, 2000)
+
+    results = run_backtest(
         returns,
-        weights,
-        transaction_cost=0.001,
-        structural_stop=None
-    ):
+        use_critical_overlay=True,
+        overlay_mode="dynamic_percentile",
+        window=252,
+        percentile=80,
+        hedge_exposure=0.4
+    )
 
-        self.returns = returns
-        self.weights = weights
-        self.transaction_cost = transaction_cost
-        self.structural_stop = structural_stop
-
-        self._run_backtest()
-
-    # ==========================================================
-    # EXECUÇÃO
-    # ==========================================================
-
-    def _run_backtest(self):
-
-        # Portfolio returns
-        port_returns = self.returns @ self.weights
-
-        # Aplicar custo de transação (simples)
-        port_returns = port_returns - self.transaction_cost
-
-        # Equity curve
-        self.equity_curve = (1 + port_returns).cumprod()
-
-        # Stop estrutural (opcional)
-        if self.structural_stop is not None:
-            dd = self.equity_curve / self.equity_curve.cummax() - 1
-            if dd.min() < self.structural_stop:
-                self.equity_curve.loc[dd.idxmin():] = self.equity_curve.loc[dd.idxmin()]
-
-        # Drawdown
-        self.drawdown = self.equity_curve / self.equity_curve.cummax() - 1
-
-        # Guardar retornos
-        self.portfolio_returns = port_returns
-
-    # ==========================================================
-    # MÉTRICAS
-    # ==========================================================
-
-    def compute_metrics(self):
-
-        r = self.portfolio_returns
-
-        sharpe = np.mean(r) / (np.std(r) + 1e-12)
-        sortino = np.mean(r) / (np.std(r[r < 0]) + 1e-12)
-        max_dd = self.drawdown.min()
-        cvar = np.mean(r[r <= np.percentile(r, 5)])
-
-        return {
-            "sharpe": sharpe,
-            "sortino": sortino,
-            "max_dd": max_dd,
-            "cvar": cvar
-        }
-
-    # ==========================================================
-    # RELATÓRIO (CLI)
-    # ==========================================================
-
-    def report(self):
-
-        metrics = self.compute_metrics()
-
-        print("\n===== PERFORMANCE =====")
-        print("Sharpe:", metrics["sharpe"])
-        print("Sortino:", metrics["sortino"])
-        print("Max Drawdown:", metrics["max_dd"])
-        print("CVaR:", metrics["cvar"])
-
-        return metrics
+    print("\n=== RESULTADOS ===")
+    for k, v in results.items():
+        print(f"{k}: {v:.4f}")

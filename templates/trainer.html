@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Neural Forecast Trainer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-950 text-gray-200 min-h-screen flex items-center justify-center">
+
+<div class="w-full max-w-3xl p-8 space-y-8">
+
+  <h1 class="text-3xl font-bold text-white">
+    Neural Forecast Trainer
+  </h1>
+
+  <div class="bg-gray-900 rounded-2xl p-6 space-y-6 border border-gray-800">
+
+    <div class="grid grid-cols-2 gap-6">
+
+      <div>
+        <label class="text-sm text-gray-400">Tickers</label>
+        <input id="tickers"
+          class="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2"
+          value="AAPL,MSFT">
+      </div>
+
+      <div>
+        <label class="text-sm text-gray-400">Model Name</label>
+        <input id="model_name"
+          class="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2"
+          value="model_test">
+      </div>
+
+      <div>
+        <label class="text-sm text-gray-400">Input Size</label>
+        <input type="number" id="input_size"
+          class="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2"
+          value="60">
+      </div>
+
+      <div>
+        <label class="text-sm text-gray-400">Horizon</label>
+        <input type="number" id="horizon"
+          class="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2"
+          value="10">
+      </div>
+
+    </div>
+
+    <button onclick="train()"
+      class="w-full bg-indigo-600 hover:bg-indigo-500 rounded-xl py-3 font-semibold text-white">
+      🚀 Treinar Modelo
+    </button>
+
+    <div id="status" class="text-sm text-gray-400"></div>
+
+  </div>
+
+  <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800">
+    <h2 class="text-lg font-semibold text-white mb-4">
+      Modelos Disponíveis
+    </h2>
+
+    <select id="models"
+      class="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2">
+    </select>
+  </div>
+
+</div>
+
+<script>
+
+async function loadModels() {
+  const res = await fetch("/models");
+  const data = await res.json();
+
+  const dropdown = document.getElementById("models");
+  dropdown.innerHTML = "";
+
+  data.forEach(model => {
+    const option = document.createElement("option");
+    option.text = model;
+    dropdown.add(option);
+  });
+}
+
+async function train() {
+
+  const tickers = document.getElementById("tickers").value;
+  const input_size = document.getElementById("input_size").value;
+  const horizon = document.getElementById("horizon").value;
+  const model_name = document.getElementById("model_name").value;
+
+  const status = document.getElementById("status");
+  status.innerText = "Treinamento iniciado...";
+
+  await fetch("/train", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tickers,
+      input_size,
+      horizon,
+      model_name
+    })
+  });
+
+  status.innerText = "Treino disparado.";
+  setTimeout(loadModels, 4000);
+}
+
+loadModels();
+
+</script>
+
+</body>
+</html>

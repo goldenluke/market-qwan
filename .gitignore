@@ -26,3 +26,19 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Virtual environment
+market-qwan-env/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Model files
+models/*.pkl
+
+# OS
+.DS_Store

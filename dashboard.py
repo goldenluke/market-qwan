@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-
+import webbrowser
 from src.data_loader import DataLoader
 from src.qwan_regime_model import RegimeAwareQWAN
 from src.backtest_institutional import InstitutionalBacktest
@@ -12,10 +12,97 @@ from src.phi_surface import phi_surface
 from src.stress_test import stress_test
 from src.montecarlo_equity import monte_carlo_equity
 from src.quant_fund_engine import QuantFundEngine
+from src.qwan_forecast_model import QWANForecastModel
+import numpy as np
+import numpy as np
+import networkx as nx
+from src.qwan_forecast_model import QWANForecastModel
+import os
+import subprocess
+import sys
 
+@st.cache_resource
+def load_forecast_model(returns):
+    model = QWANForecastModel(horizon=30, input_size=126)
+    model.fit(returns)
+    return model
+
+def correlation_network(returns_matrix, threshold=0.5):
+    """
+    Cria uma rede de correlação a partir da matriz de retornos.
+    Nós = ativos
+    Arestas = correlação acima do threshold
+    """
+
+    corr = np.corrcoef(returns_matrix.T)
+    n_assets = corr.shape[0]
+
+    G = nx.Graph()
+
+    # adiciona nós
+    for i in range(n_assets):
+        G.add_node(i)
+
+    # adiciona arestas se |correlação| > threshold
+    for i in range(n_assets):
+        for j in range(i + 1, n_assets):
+            if abs(corr[i, j]) > threshold:
+                G.add_edge(i, j, weight=corr[i, j])
+
+    return G
+
+
+def network_stress_index(G):
+    """
+    Mede estresse como densidade da rede.
+    Quanto mais conectada, maior o risco sistêmico.
+    """
+
+    if len(G.nodes) <= 1:
+        return 0.0
+
+    density = nx.density(G)
+
+    return float(density)
+def rolling_susceptibility(market_returns, window=126):
+    series = pd.Series(market_returns)
+
+    rolling_mean = series.rolling(window).mean()
+    rolling_var = series.rolling(window).var()
+
+    chi = rolling_var / (rolling_mean.abs() + 1e-8)
+
+    return chi.values
+
+def eigenvalue_stress(returns_matrix):
+    """
+    Calcula o estresse sistêmico baseado no autovalor dominante
+    da matriz de correlação.
+    """
+
+    # Matriz de correlação
+    corr = np.corrcoef(returns_matrix.T)
+
+    # Autovalores
+    eigenvalues = np.linalg.eigvals(corr)
+
+    lambda_max = np.max(eigenvalues).real
+    lambda_mean = np.mean(eigenvalues).real
+
+    stress_index = lambda_max / lambda_mean
+
+    return {
+        "lambda_max": float(lambda_max),
+        "lambda_mean": float(lambda_mean),
+        "stress_index": float(stress_index)
+    }
 # ==========================================================
 # CONFIGURAÇÃO
 # ==========================================================
+
+import numpy as np
+
+
 
 st.set_page_config(
     page_title="Market-QWAN Institutional Platform",
@@ -136,7 +223,9 @@ if run:
             "🧠 Regimes",
             "🧮 Φ Surface",
             "⚠ Stress Test",
-            "🎲 Monte Carlo"
+            "🎲 Monte Carlo",
+            "🌐 Systemic Risk",  # NOVA ABA
+            "📈 Forecast"
         ])
 
         # ==========================================================
@@ -345,6 +434,156 @@ if run:
                 px.histogram(mc.iloc[-1], nbins=40),
                 use_container_width=True
             )
+
+            # ==========================================================
+            # 🌐 SYSTEMIC RISK
+            # ==========================================================
+
+        with tabs[6]:
+
+            st.subheader("Systemic Risk Monitor")
+
+            st.markdown("""
+            **Leigo:**  
+            Mede se o mercado está se movendo de forma sincronizada e arriscada.
+
+            **Técnico:**  
+            Monitor baseado em autovalor dominante da matriz de correlação
+            e densidade da rede de correlação.
+            """)
+
+            returns_matrix = returns.values
+
+            # ----------------------------
+            # Eigenvalue Stress
+            # ----------------------------
+            eigen = eigenvalue_stress(returns_matrix)
+
+            # ----------------------------
+            # Correlation Heatmap
+            # ----------------------------
+            st.subheader("Correlation Heatmap")
+
+            corr = np.corrcoef(returns_matrix.T)
+
+            fig_corr = go.Figure(
+                data=go.Heatmap(
+                    z=corr,
+                    colorscale="RdBu",
+                    zmin=-1,
+                    zmax=1
+                )
+            )
+
+            st.plotly_chart(fig_corr, use_container_width=True)
+
+            # ----------------------------
+            # Rolling Susceptibility
+            # ----------------------------
+            st.subheader("Rolling Market Susceptibility (χ)")
+
+            market_returns = returns.mean(axis=1)
+            chi = rolling_susceptibility(market_returns, window=126)
+
+            st.plotly_chart(
+                px.line(
+                    x=returns.index,
+                    y=chi,
+                    labels={"x": "Date", "y": "χ"},
+                    title="Rolling Susceptibility"
+                ),
+                use_container_width=True
+            )
+
+            # ----------------------------
+            # Network Stress
+            # ----------------------------
+            G = correlation_network(returns_matrix, threshold=0.5)
+            net_stress = network_stress_index(G)
+
+            st.metric("Network Stress Index", round(net_stress, 2))
+
+            # ----------------------------
+            # Indicador Sistêmico Composto
+            # ----------------------------
+            systemic_index = (
+                eigen["stress_index"] * 0.5 +
+                net_stress * 0.3 +
+                np.nanmean(chi[-50:]) * 0.2
+            )
+
+            st.metric("Composite Systemic Risk", round(systemic_index, 2))
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.metric(
+                    "λ_max",
+                    round(eigen["lambda_max"], 2)
+                )
+
+            with col2:
+                st.metric(
+                    "Stress Index (λ_max / λ_mean)",
+                    round(eigen["stress_index"], 2)
+                )    
+
+        with tabs[7]:
+
+            st.subheader("Neural Forecast")
+            
+
+
+            st.divider()
+
+            # 🔥 BOTÃO EXTERNO (NÃO USA st.button)
+            st.markdown(
+                """
+                <a href="http://127.0.0.1:5050" target="_blank" style="text-decoration:none;">
+                    <div style="
+                        background-color:#6366f1;
+                        color:white;
+                        padding:12px 20px;
+                        border-radius:10px;
+                        font-weight:600;
+                        text-align:center;
+                        width:260px;
+                        cursor:pointer;">
+                        🚀 Abrir Neural Forecast Trainer
+                    </div>
+                </a>
+                """,
+                unsafe_allow_html=True
+            )
+
+            model_dir = "models"
+
+            if not os.path.exists(model_dir):
+                st.warning("Diretório models não encontrado.")
+            else:
+
+                model_files = [
+                    f for f in os.listdir(model_dir)
+                    if f.endswith(".pkl")
+                ]
+
+                if not model_files:
+                    st.warning("Nenhum modelo encontrado.")
+                else:
+
+                    selected_model = st.selectbox(
+                        "Selecionar modelo",
+                        model_files
+                    )
+
+                    model_path = os.path.join(model_dir, selected_model)
+
+                    model = QWANForecastModel.load(model_path)
+
+                    forecast = model.predict()
+                    forecast_series = forecast.set_index("ds").iloc[:, -1]
+
+                    st.line_chart(forecast_series)
 
     except Exception as e:
         st.error(f"Erro: {e}")
