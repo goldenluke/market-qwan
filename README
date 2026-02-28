@@ -1,0 +1,204 @@
+# 🏦 Market-QWAN
+## Plataforma Quantitativa Institucional Multi-Regime
+
+O **Market-QWAN** é uma plataforma de pesquisa e desenvolvimento de estratégias quantitativas baseada em:
+
+- Modelagem multi-regime (Hidden Markov Models)
+- Walk-forward rolling real
+- Controle estrutural de risco (CVaR + Stop estrutural)
+- Target volatility
+- Superfície funcional Φ (entropia × momentum)
+- Simulação Monte Carlo regime-switching
+- Backtest institucional comparativo
+- Engine estilo fundo quantitativo
+
+---
+
+# 📘 Filosofia do Sistema
+
+O sistema **não busca apenas maximizar retorno**.
+
+Ele busca:
+
+- Robustez estrutural
+- Adaptação multi-regime
+- Controle explícito de risco
+- Sobrevivência sob múltiplos futuros
+- Equilíbrio entre liberdade configuracional e coerência estrutural
+
+Inspirado no conceito de **Qualidade Sem Nome (QWAN)** aplicado ao mercado.
+
+---
+
+# 🧠 Arquitetura
+
+## 1️⃣ Modelo Multi-Regime
+
+- Hidden Markov Model (HMM)
+- Detecção de estados latentes de mercado
+- Posterior probabilístico
+- Transição entre regimes
+
+## 2️⃣ Funcional Φ (QWAN)
+
+O funcional estrutural é definido como:
+
+\[
+\Phi = G - \alpha H - \gamma \mu
+\]
+
+Onde:
+
+- \( G \) = ganho esperado ajustado por risco
+- \( H \) = entropia estruturada dos pesos
+- \( \mu \) = momentum condicional
+- \( \alpha, \gamma \) = parâmetros estruturais
+
+---
+
+## 3️⃣ QuantFundEngine
+
+Implementa:
+
+- Walk-forward rolling real
+- Rebalanceamento periódico
+- CVaR constraint
+- Target volatility scaling
+- Stop estrutural
+- Benchmark comparativo
+
+---
+
+# 📊 Funcionalidades do Dashboard
+
+- 📈 Equity Curve vs Benchmark
+- 📉 Drawdown
+- 📊 Rolling Sharpe & Alpha
+- 🧠 Regime detection
+- 🧮 Superfície Φ 3D
+- ⚠ Stress test histórico
+- 🎲 Monte Carlo regime-switching
+- 🏦 Engine estilo fundo quantitativo
+
+---
+
+# 🏗 Estrutura do Projeto
+
+```
+market-qwan/
+│
+├── dashboard.py
+├── main.py
+├── dash_app.py
+├── requirements.txt
+├── README.md
+│
+└── src/
+    ├── quant_fund_engine.py
+    ├── qwan_regime_model.py
+    ├── backtest_institutional.py
+    ├── data_loader.py
+    ├── attribution.py
+    ├── phi_surface.py
+    ├── stress_test.py
+    ├── montecarlo_equity.py
+```
+
+---
+
+# 🚀 Instalação
+
+## 1️⃣ Criar ambiente virtual
+
+```bash
+python3 -m venv market-qwan-env
+source market-qwan-env/bin/activate
+```
+
+## 2️⃣ Instalar dependências
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+# ▶ Rodar Backtest Local
+
+```bash
+python main.py
+```
+
+---
+
+# ▶ Rodar Dashboard Streamlit
+
+```bash
+streamlit run dashboard.py
+```
+
+---
+
+# ▶ Rodar Dashboard Dash
+
+```bash
+python dash_app.py
+```
+
+---
+
+# 📈 Métricas Implementadas
+
+- CAGR
+- Sharpe
+- Sortino
+- Alpha
+- Max Drawdown
+- CVaR
+- Rolling Sharpe
+- Rolling Alpha
+- Regime Attribution
+
+---
+
+# ⚠ Limitações Científicas (Honestidade Epistemológica)
+
+- Shannon ≠ significado funcional
+- HMM assume gaussianidade
+- Parâmetros α e γ são fenomenológicos
+- Regime detection depende da janela histórica
+- Não há garantia de universalidade
+
+O sistema é uma **plataforma de pesquisa quantitativa**, não recomendação de investimento.
+
+---
+
+# 🎯 Próximos Desenvolvimentos
+
+- Ensemble multi-estratégia
+- Bayesian regime inference
+- Deep learning temporal (TFT)
+- Capital allocation entre engines
+- Deploy SaaS
+- API institucional
+
+---
+
+# 👨‍💻 Autor
+
+**Lucas Amaral Dourado**
+- Medicina — Universidade Federal do Tocantins
+- Ciência da Computação — Centro Universitário Internacional
+- Pesquisador em epidemiologia computacional
+- Interesse em sistemas complexos, biofísica e modelagem quantitativa
+
+LinkedIn:
+https://www.linkedin.com/in/lucas-amaral-dourado-b5939b2aa/
+
+---
+
+# 📜 Licença
+
+Projeto acadêmico / pesquisa quantitativa.
+
+Uso por conta e risco do usuário.
