@@ -1,0 +1,2520 @@
+# === Início do arquivo: ./api.py ===
+
+from fastapi import FastAPI
+import numpy as np
+import pandas as pd
+
+from src.data_loader import DataLoader
+from src.qwan_regime_model import RegimeAwareQWAN
+
+app = FastAPI()
+
+
+@app.get("/weights")
+def get_weights():
+
+    loader = DataLoader(
+        tickers=["AAPL","MSFT","GOOGL","AMZN","META"],
+        period="5y"
+    )
+
+    returns = loader.load()
+
+    model = RegimeAwareQWAN(returns)
+    weights = model.get_probabilistic_weights()
+
+    return {
+        "weights": dict(zip(returns.columns, weights.tolist()))
+    }
+
+# === Fim do arquivo: ./api.py ===
+
+# === Início do arquivo: ./dashboard.py ===
+
+import streamlit as st
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+
+from src.data_loader import DataLoader
+from src.qwan_regime_model import RegimeAwareQWAN
+from src.backtest_institutional import InstitutionalBacktest
+from src.attribution import regime_attribution
+from src.phi_surface import phi_surface
+from src.stress_test import stress_test
+from src.montecarlo_equity import monte_carlo_equity
+
+
+# ==========================================================
+# CONFIGURAÇÃO
+# ==========================================================
+
+st.set_page_config(
+    page_title="Market-QWAN Institutional Platform",
+    layout="wide"
+)
+
+st.title("🏦 Market-QWAN Institutional Quant Platform")
+
+st.markdown("""
+### 📘 Sobre o Sistema
+
+**Leigo:**  
+Este painel mostra como a estratégia tenta crescer o capital controlando riscos e se adaptando a diferentes tipos de mercado.
+
+**Técnico:**  
+Engine multi-regime com walk-forward rolling, vol targeting, stop estrutural,
+benchmark comparativo, superfície funcional Φ e simulação Monte Carlo regime-switching.
+""")
+
+# ==========================================================
+# SIDEBAR
+# ==========================================================
+
+st.sidebar.header("⚙ Configuração")
+
+tickers_input = st.sidebar.text_input("Tickers", "AAPL,MSFT,GOOGL,AMZN,META")
+period = st.sidebar.selectbox("Período", ["2y", "3y", "5y", "10y"], index=2)
+
+n_regimes = st.sidebar.slider("Regimes", 2, 5, 3)
+alpha = st.sidebar.slider("Alpha (Entropia)", 0.0, 2.0, 0.6)
+gamma = st.sidebar.slider("Gamma (Momentum)", 0.0, 2.0, 0.5)
+target_vol = st.sidebar.slider("Target Vol", 0.05, 0.30, 0.15)
+stop_dd = st.sidebar.slider("Stop Estrutural", -0.5, -0.05, -0.25)
+
+run = st.sidebar.button("🚀 Rodar Modelo")
+
+# ==========================================================
+# EXECUÇÃO
+# ==========================================================
+
+if run:
+
+    try:
+
+        tickers = [t.strip() for t in tickers_input.split(",")]
+
+        with st.spinner("🔄 Processando modelo..."):
+
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            # 1️⃣ Dados
+            status_text.text("📥 Baixando dados...")
+            loader = DataLoader(tickers=tickers, period=period)
+            returns = loader.load()
+            progress_bar.progress(20)
+
+            # 2️⃣ Modelo
+            status_text.text("🧠 Treinando modelo multi-regime...")
+            model = RegimeAwareQWAN(
+                returns=returns,
+                n_regimes=n_regimes,
+                alpha=alpha,
+                gamma=gamma,
+                target_vol=target_vol
+            )
+            progress_bar.progress(40)
+
+            # 3️⃣ Backtest institucional
+            status_text.text("📈 Executando walk-forward institucional...")
+            bt = InstitutionalBacktest(
+                returns=returns,
+                model_class=lambda r: RegimeAwareQWAN(
+                    r,
+                    n_regimes=n_regimes,
+                    alpha=alpha,
+                    gamma=gamma,
+                    target_vol=target_vol
+                ),
+                lookback=252,
+                rebalance_frequency=21,
+                target_vol=target_vol,
+                stop_drawdown=stop_dd
+            )
+            progress_bar.progress(70)
+
+            equity = bt.equity_curve
+            benchmark = bt.benchmark_equity
+            drawdown = bt.drawdown
+            metrics = bt.compute_metrics()
+
+            # 4️⃣ Superfície Φ
+            status_text.text("🧮 Calculando superfície Φ...")
+            alpha_vals, gamma_vals, Z = phi_surface(
+                model,
+                grid_size=25,
+                mode="posterior"
+            )
+            progress_bar.progress(85)
+
+            # 5️⃣ Monte Carlo
+            status_text.text("🎲 Simulando Monte Carlo...")
+            mc = monte_carlo_equity(model, T=252, n_sim=200)
+            progress_bar.progress(100)
+
+            status_text.text("✅ Execução concluída.")
+
+        progress_bar.empty()
+        status_text.empty()
+
+        # ==========================================================
+        # ABAS
+        # ==========================================================
+
+        tabs = st.tabs([
+            "📈 Performance",
+            "📊 Rolling Metrics",
+            "🧠 Regimes",
+            "🧮 Φ Surface",
+            "⚠ Stress Test",
+            "🎲 Monte Carlo"
+        ])
+
+        # ==========================================================
+        # 📈 PERFORMANCE
+        # ==========================================================
+
+        with tabs[0]:
+
+            st.subheader("Equity Curve")
+
+            st.markdown("""
+            **Leigo:**  
+            Mostra quanto o capital teria crescido ao longo do tempo.
+
+            **Técnico:**  
+            Retorno acumulado multiplicativo comparado ao benchmark equal-weight.
+            """)
+
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=equity.index, y=equity, name="QWAN"))
+            fig.add_trace(go.Scatter(x=benchmark.index, y=benchmark, name="Benchmark"))
+            st.plotly_chart(fig, use_container_width=True)
+
+            st.subheader("Drawdown")
+
+            st.markdown("""
+            **Leigo:**  
+            Mostra as maiores quedas temporárias.
+
+            **Técnico:**  
+            Drawdown percentual relativo ao máximo histórico.
+            """)
+
+            st.plotly_chart(px.line(drawdown), use_container_width=True)
+
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("CAGR", round(metrics.get("cagr", 0), 3))
+            col2.metric("Sharpe", round(metrics.get("sharpe", 0), 3))
+            col3.metric("Sortino", round(metrics.get("sortino", 0), 3))
+            col4.metric("Alpha", round(metrics.get("alpha", 0), 3))
+
+
+        # ==========================================================
+        # 📊 ROLLING METRICS
+        # ==========================================================
+
+        with tabs[1]:
+
+            st.subheader("Rolling Sharpe")
+
+            st.markdown("""
+            **Leigo:**  
+            Mede se a estratégia está funcionando bem recentemente.
+
+            **Técnico:**  
+            Sharpe anualizado em janela móvel de 6 meses.
+            """)
+
+            rolling_sharpe = (
+                bt.portfolio_returns.rolling(126).mean() * 252 /
+                (bt.portfolio_returns.rolling(126).std() * np.sqrt(252))
+            )
+
+            st.plotly_chart(px.line(rolling_sharpe), use_container_width=True)
+
+            st.subheader("Rolling Alpha")
+
+            st.markdown("""
+            **Leigo:**  
+            Mostra se estamos realmente batendo o mercado.
+
+            **Técnico:**  
+            Alpha anualizado rolling contra benchmark.
+            """)
+
+            rolling_alpha = (
+                (bt.portfolio_returns - bt.benchmark_returns)
+                .rolling(126).mean() * 252
+            )
+
+            st.plotly_chart(px.line(rolling_alpha), use_container_width=True)
+
+
+        # ==========================================================
+        # 🧠 REGIMES
+        # ==========================================================
+
+        with tabs[2]:
+
+            st.subheader("Regime ao Longo do Tempo")
+
+            st.markdown("""
+            **Leigo:**  
+            Mostra os tipos de mercado identificados automaticamente.
+
+            **Técnico:**  
+            Sequência de estados latentes inferidos via HMM.
+            """)
+
+            regime_series = pd.Series(model.hidden_states, index=returns.index)
+            st.plotly_chart(px.scatter(regime_series), use_container_width=True)
+
+            st.subheader("Attribution por Regime")
+
+            st.markdown("""
+            **Leigo:**  
+            Mostra como a estratégia se comporta em cada tipo de mercado.
+
+            **Técnico:**  
+            Retorno médio e volatilidade condicional por estado latente.
+            """)
+
+            attr = regime_attribution(
+                returns,
+                model.hidden_states,
+                bt.portfolio_returns
+            )
+
+            st.dataframe(attr)
+
+
+        # ==========================================================
+        # 🧮 Φ SURFACE
+        # ==========================================================
+
+        with tabs[3]:
+
+            st.subheader("Superfície Φ")
+
+            st.markdown("""
+            **Leigo:**  
+            Mostra como o desempenho muda quando ajustamos parâmetros.
+
+            **Técnico:**  
+            Paisagem do funcional Φ no espaço (α, γ).
+            """)
+
+            fig_surface = go.Figure(
+                data=[go.Surface(z=Z, x=alpha_vals, y=gamma_vals)]
+            )
+
+            fig_surface.update_layout(
+                scene=dict(
+                    xaxis_title="Alpha",
+                    yaxis_title="Gamma",
+                    zaxis_title="Φ"
+                )
+            )
+
+            st.plotly_chart(fig_surface, use_container_width=True)
+
+
+        # ==========================================================
+        # ⚠ STRESS TEST
+        # ==========================================================
+
+        with tabs[4]:
+
+            st.subheader("Stress Test -20%")
+
+            st.markdown("""
+            **Leigo:**  
+            Simula uma grande queda repentina.
+
+            **Técnico:**  
+            Choque exógeno aplicado à série de retornos.
+            """)
+
+            stress_equity = stress_test(bt.portfolio_returns, -0.2)
+            st.plotly_chart(px.line(stress_equity), use_container_width=True)
+
+
+        # ==========================================================
+        # 🎲 MONTE CARLO
+        # ==========================================================
+
+        with tabs[5]:
+
+            st.subheader("Monte Carlo Regime Switching")
+
+            st.markdown("""
+            **Leigo:**  
+            Simula vários futuros possíveis.
+
+            **Técnico:**  
+            Simulação estocástica baseada na matriz de transição do HMM.
+            """)
+
+            fig_mc = go.Figure()
+            for i in range(min(50, mc.shape[1])):
+                fig_mc.add_trace(go.Scatter(y=mc.iloc[:, i], showlegend=False))
+
+            st.plotly_chart(fig_mc, use_container_width=True)
+
+            st.subheader("Distribuição Final")
+
+            st.markdown("""
+            **Leigo:**  
+            Mostra os possíveis resultados finais.
+
+            **Técnico:**  
+            Distribuição empírica do valor final da equity simulada.
+            """)
+
+            st.plotly_chart(
+                px.histogram(mc.iloc[-1], nbins=40),
+                use_container_width=True
+            )
+
+    except Exception as e:
+        st.error(f"Erro: {e}")
+
+# === Fim do arquivo: ./dashboard.py ===
+
+# === Início do arquivo: ./main.py ===
+
+import numpy as np
+import pandas as pd
+
+from src.data_loader import DataLoader
+from src.quant_fund_engine import QuantFundEngine
+
+
+# ==========================================================
+# MÉTRICAS INSTITUCIONAIS
+# ==========================================================
+
+def compute_metrics(equity_curve: pd.Series):
+
+    returns = equity_curve.pct_change().dropna()
+
+    sharpe = (returns.mean() * 252) / (returns.std() * np.sqrt(252) + 1e-8)
+
+    downside = returns[returns < 0]
+    sortino = (returns.mean() * 252) / (
+        downside.std() * np.sqrt(252) + 1e-8
+    )
+
+    rolling_max = equity_curve.cummax()
+    drawdown = equity_curve / rolling_max - 1
+    max_dd = drawdown.min()
+
+    cagr = (equity_curve.iloc[-1]) ** (252 / len(equity_curve)) - 1
+
+    vol = returns.std() * np.sqrt(252)
+
+    return {
+        "CAGR": round(cagr, 4),
+        "Sharpe": round(sharpe, 4),
+        "Sortino": round(sortino, 4),
+        "Vol": round(vol, 4),
+        "Max Drawdown": round(max_dd, 4)
+    }
+
+
+# ==========================================================
+# MAIN
+# ==========================================================
+
+def main():
+
+    print("📥 Baixando dados...")
+
+    tickers = ["SPY", "TLT", "GLD", "VNQ", "DBC"]
+
+    loader = DataLoader(tickers=tickers, period="10y")
+    returns = loader.load()
+
+    print("Dados carregados.")
+    print(returns.tail())
+
+    print("\n🧠 Rodando engine institucional...")
+
+    engine = QuantFundEngine(
+        returns=returns,
+        window=504,         # 2 anos rolling
+        target_vol=0.15,
+        cvar_limit=0.05
+    )
+
+    equity = engine.run()
+
+    print("Engine concluída.")
+
+    # ======================================================
+    # BENCHMARKS
+    # ======================================================
+
+    print("\n📊 Calculando benchmarks...")
+
+    # Equal Weight
+    eq_weights = np.ones(len(tickers)) / len(tickers)
+    eq_returns = returns.iloc[504:] @ eq_weights
+    eq_equity = (1 + eq_returns).cumprod()
+
+    # SPY benchmark
+    spy_equity = (1 + returns["SPY"].iloc[504:]).cumprod()
+
+    # ======================================================
+    # MÉTRICAS
+    # ======================================================
+
+    print("\n===== 📈 QWAN ENGINE =====")
+    qwan_metrics = compute_metrics(equity)
+    for k, v in qwan_metrics.items():
+        print(f"{k}: {v}")
+
+    print("\n===== 📊 EQUAL WEIGHT =====")
+    eq_metrics = compute_metrics(eq_equity)
+    for k, v in eq_metrics.items():
+        print(f"{k}: {v}")
+
+    print("\n===== 📉 SPY =====")
+    spy_metrics = compute_metrics(spy_equity)
+    for k, v in spy_metrics.items():
+        print(f"{k}: {v}")
+
+    # ======================================================
+    # EXPORT OPCIONAL
+    # ======================================================
+
+    equity.to_csv("qwan_equity.csv")
+    print("\nEquity exportada para qwan_equity.csv")
+
+
+# ==========================================================
+# RUN
+# ==========================================================
+
+if __name__ == "__main__":
+    main()
+
+# === Fim do arquivo: ./main.py ===
+
+# === Início do arquivo: ./api/main.py ===
+
+from fastapi import FastAPI
+from pydantic import BaseModel
+from typing import List
+
+from src.data_loader import DataLoader
+from src.qwan_regime_model import RegimeAwareQWAN
+
+
+app = FastAPI(title="Market-QWAN API")
+
+
+class ModelRequest(BaseModel):
+    tickers: List[str]
+    period: str = "5y"
+    n_regimes: int = 3
+    alpha: float = 0.6
+    gamma: float = 0.5
+    target_vol: float = 0.15
+    cvar_limit: float = 0.03
+
+
+@app.post("/optimize")
+def optimize_portfolio(request: ModelRequest):
+
+    loader = DataLoader(
+        tickers=request.tickers,
+        period=request.period
+    )
+
+    returns = loader.load()
+
+    model = RegimeAwareQWAN(
+        returns=returns,
+        n_regimes=request.n_regimes,
+        alpha=request.alpha,
+        gamma=request.gamma,
+        target_vol=request.target_vol,
+        cvar_limit=request.cvar_limit
+    )
+
+    weights = model.get_probabilistic_weights()
+
+    return {
+        "tickers": request.tickers,
+        "weights": weights.tolist(),
+        "current_regime": model.get_current_regime(),
+        "forecast_3_steps": model.forecast_regime_probability(3).tolist()
+    }
+
+
+@app.get("/")
+def health_check():
+    return {"status": "Market-QWAN API running"}
+
+# === Fim do arquivo: ./api/main.py ===
+
+# === Início do arquivo: ./src/__init__.py ===
+
+
+
+# === Fim do arquivo: ./src/__init__.py ===
+
+# === Início do arquivo: ./src/advanced_timeseries.py ===
+
+import numpy as np
+import pandas as pd
+import scipy.stats as stats
+import ruptures as rpt
+
+from statsmodels.tsa.stattools import adfuller, kpss
+from statsmodels.stats.diagnostic import acorr_ljungbox
+from statsmodels.tsa.seasonal import STL
+from statsmodels.tsa.api import VAR
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
+from arch import arch_model
+from scipy.fft import fft
+from scipy.signal import periodogram
+from sklearn.linear_model import LinearRegression
+
+
+class AdvancedTimeSeriesAnalyzer:
+
+    def __init__(self, returns: pd.Series):
+        self.returns = returns.dropna()
+
+    # ==========================================================
+    # 1️⃣ Stationarity Tests
+    # ==========================================================
+
+    def stationarity_tests(self):
+
+        adf = adfuller(self.returns)
+        kpss_test = kpss(self.returns, regression='c')
+
+        return {
+            "ADF_stat": adf[0],
+            "ADF_p": adf[1],
+            "KPSS_stat": kpss_test[0],
+            "KPSS_p": kpss_test[1]
+        }
+
+    # ==========================================================
+    # 2️⃣ STL Decomposition
+    # ==========================================================
+
+    def stl_decomposition(self):
+
+        stl = STL(self.returns, period=21)
+        result = stl.fit()
+
+        return result.trend, result.seasonal, result.resid
+
+    # ==========================================================
+    # 3️⃣ Hurst Exponent
+    # ==========================================================
+
+    def hurst_exponent(self):
+
+        lags = range(2, 20)
+        tau = [
+            np.std(self.returns.diff(lag).dropna())
+            for lag in lags
+        ]
+
+        reg = np.polyfit(np.log(lags), np.log(tau), 1)
+
+        return reg[0] * 2
+
+    # ==========================================================
+    # 4️⃣ GARCH Volatility
+    # ==========================================================
+
+    def garch_volatility(self):
+
+        model = arch_model(self.returns * 100, vol='Garch', p=1, q=1)
+        res = model.fit(disp='off')
+
+        return res.conditional_volatility / 100
+
+    # ==========================================================
+    # 5️⃣ Markov Switching
+    # ==========================================================
+
+    def markov_switching(self):
+
+        model = MarkovRegression(
+            self.returns,
+            k_regimes=2,
+            trend='c',
+            switching_variance=True
+        )
+
+        res = model.fit()
+
+        return res.smoothed_marginal_probabilities
+
+    # ==========================================================
+    # 6️⃣ Spectral Density
+    # ==========================================================
+
+    def spectral_analysis(self):
+
+        freq, power = periodogram(self.returns)
+
+        return freq, power
+
+    # ==========================================================
+    # 7️⃣ Change Point Detection
+    # ==========================================================
+
+    def change_points(self):
+
+        algo = rpt.Pelt(model="rbf").fit(self.returns.values)
+        result = algo.predict(pen=10)
+
+        return result
+
+    # ==========================================================
+    # 8️⃣ EVT Tail Risk
+    # ==========================================================
+
+    def extreme_value_analysis(self, threshold_quantile=0.95):
+
+        threshold = self.returns.quantile(threshold_quantile)
+        excess = self.returns[self.returns > threshold] - threshold
+
+        shape, loc, scale = stats.genpareto.fit(excess)
+
+        return {
+            "shape": shape,
+            "scale": scale
+        }
+
+    # ==========================================================
+    # 9️⃣ VAR Multivariado
+    # ==========================================================
+
+    @staticmethod
+    def var_model(data: pd.DataFrame):
+
+        model = VAR(data)
+        res = model.fit(maxlags=5)
+
+        return res.summary()
+
+    # ==========================================================
+    # 🔟 Entropia Rolling
+    # ==========================================================
+
+    def rolling_entropy(self, window=60):
+
+        def entropy(x):
+            hist = np.histogram(x, bins=10)[0]
+            p = hist / np.sum(hist)
+            p = p[p > 0]
+            return -np.sum(p * np.log(p))
+
+        return self.returns.rolling(window).apply(entropy)
+
+# === Fim do arquivo: ./src/advanced_timeseries.py ===
+
+# === Início do arquivo: ./src/attribution.py ===
+
+import pandas as pd
+import numpy as np
+
+
+def regime_attribution(returns, regimes, portfolio_returns):
+    df = pd.DataFrame({
+        "ret": portfolio_returns,
+        "regime": regimes[-len(portfolio_returns):]
+    })
+
+    attribution = df.groupby("regime")["ret"].agg(
+        ["mean", "std", "count"]
+    )
+
+    attribution["annual_return"] = attribution["mean"] * 252
+    attribution["annual_vol"] = attribution["std"] * np.sqrt(252)
+
+    return attribution
+
+# === Fim do arquivo: ./src/attribution.py ===
+
+# === Início do arquivo: ./src/backtest.py ===
+
+import numpy as np
+import pandas as pd
+
+
+class Backtest:
+
+    def __init__(
+        self,
+        returns,
+        weights,
+        transaction_cost=0.001,
+        structural_stop=None
+    ):
+
+        self.returns = returns
+        self.weights = weights
+        self.transaction_cost = transaction_cost
+        self.structural_stop = structural_stop
+
+        self._run_backtest()
+
+    # ==========================================================
+    # EXECUÇÃO
+    # ==========================================================
+
+    def _run_backtest(self):
+
+        # Portfolio returns
+        port_returns = self.returns @ self.weights
+
+        # Aplicar custo de transação (simples)
+        port_returns = port_returns - self.transaction_cost
+
+        # Equity curve
+        self.equity_curve = (1 + port_returns).cumprod()
+
+        # Stop estrutural (opcional)
+        if self.structural_stop is not None:
+            dd = self.equity_curve / self.equity_curve.cummax() - 1
+            if dd.min() < self.structural_stop:
+                self.equity_curve.loc[dd.idxmin():] = self.equity_curve.loc[dd.idxmin()]
+
+        # Drawdown
+        self.drawdown = self.equity_curve / self.equity_curve.cummax() - 1
+
+        # Guardar retornos
+        self.portfolio_returns = port_returns
+
+    # ==========================================================
+    # MÉTRICAS
+    # ==========================================================
+
+    def compute_metrics(self):
+
+        r = self.portfolio_returns
+
+        sharpe = np.mean(r) / (np.std(r) + 1e-12)
+        sortino = np.mean(r) / (np.std(r[r < 0]) + 1e-12)
+        max_dd = self.drawdown.min()
+        cvar = np.mean(r[r <= np.percentile(r, 5)])
+
+        return {
+            "sharpe": sharpe,
+            "sortino": sortino,
+            "max_dd": max_dd,
+            "cvar": cvar
+        }
+
+    # ==========================================================
+    # RELATÓRIO (CLI)
+    # ==========================================================
+
+    def report(self):
+
+        metrics = self.compute_metrics()
+
+        print("\n===== PERFORMANCE =====")
+        print("Sharpe:", metrics["sharpe"])
+        print("Sortino:", metrics["sortino"])
+        print("Max Drawdown:", metrics["max_dd"])
+        print("CVaR:", metrics["cvar"])
+
+        return metrics
+
+# === Fim do arquivo: ./src/backtest.py ===
+
+# === Início do arquivo: ./src/backtest_dynamic.py ===
+
+import numpy as np
+import pandas as pd
+
+
+class DynamicBacktest:
+    """
+    Backtest walk-forward regime-aware institucional.
+    """
+
+    def __init__(
+        self,
+        returns: pd.DataFrame,
+        model_class,
+        rebalance_frequency: int = 21,
+        target_vol: float = 0.15
+    ):
+
+        self.returns = returns.copy()
+        self.model_class = model_class
+        self.rebalance_frequency = rebalance_frequency
+        self.target_vol = target_vol
+
+        self.portfolio_returns = None
+        self.equity_curve = None
+        self.drawdown = None
+
+        self._run_backtest()
+
+    # ==========================================================
+    # CORE ENGINE
+    # ==========================================================
+
+    def _run_backtest(self):
+
+        returns = self.returns
+        n = len(returns)
+
+        portfolio_returns = []
+        current_weights = None
+
+        # Começamos após janela mínima
+        start_index = 252 if n > 252 else int(n / 2)
+
+        for t in range(start_index, n):
+
+            # Rebalance
+            if (t - start_index) % self.rebalance_frequency == 0:
+
+                train_slice = returns.iloc[:t]
+
+                if len(train_slice) < 60:
+                    continue
+
+                model = self.model_class(train_slice)
+
+                try:
+                    current_weights = model.get_probabilistic_weights()
+                except:
+                    current_weights = np.ones(train_slice.shape[1]) / train_slice.shape[1]
+
+                current_weights = np.array(current_weights)
+
+                # Normaliza pesos
+                if current_weights.sum() != 0:
+                    current_weights = current_weights / np.sum(np.abs(current_weights))
+
+            if current_weights is None:
+                continue
+
+            daily_ret = np.dot(current_weights, returns.iloc[t])
+
+            portfolio_returns.append(daily_ret)
+
+        if len(portfolio_returns) == 0:
+            self.portfolio_returns = pd.Series(dtype=float)
+            self.equity_curve = pd.Series(dtype=float)
+            self.drawdown = pd.Series(dtype=float)
+            return
+
+        portfolio_returns = pd.Series(portfolio_returns, index=returns.index[start_index:start_index + len(portfolio_returns)])
+
+        # ======================================================
+        # VOL TARGETING
+        # ======================================================
+
+        realized_vol = portfolio_returns.std() * np.sqrt(252)
+
+        if realized_vol > 0:
+            scaling = self.target_vol / realized_vol
+            portfolio_returns = portfolio_returns * scaling
+
+        # Limite extremo defensivo
+        portfolio_returns = portfolio_returns.clip(-0.95, 5)
+
+        # ======================================================
+        # EQUITY
+        # ======================================================
+
+        equity = (1 + portfolio_returns).cumprod()
+
+        # Proteção contra colapso numérico
+        equity[equity <= 0] = np.nan
+        equity = equity.ffill().fillna(1)
+
+        drawdown = equity / equity.cummax() - 1
+
+        self.portfolio_returns = portfolio_returns
+        self.equity_curve = equity
+        self.drawdown = drawdown
+
+    # ==========================================================
+    # MÉTRICAS
+    # ==========================================================
+
+    def compute_metrics(self):
+
+        returns = self.portfolio_returns
+
+        if returns is None or len(returns) < 2:
+            return {
+                "sharpe": 0,
+                "sortino": 0,
+                "max_dd": 0,
+                "cagr": 0
+            }
+
+        equity = self.equity_curve
+
+        # ==============================
+        # CAGR
+        # ==============================
+
+        total_return = equity.iloc[-1]
+        n_years = len(returns) / 252
+
+        if n_years > 0:
+            cagr = total_return ** (1 / n_years) - 1
+        else:
+            cagr = 0
+
+        # ==============================
+        # Sharpe
+        # ==============================
+
+        mean_ret = returns.mean() * 252
+        vol = returns.std() * np.sqrt(252)
+
+        sharpe = mean_ret / vol if vol != 0 else 0
+
+        # ==============================
+        # Sortino
+        # ==============================
+
+        downside = returns[returns < 0]
+
+        if len(downside) > 0:
+            downside_vol = downside.std() * np.sqrt(252)
+            sortino = mean_ret / downside_vol if downside_vol != 0 else 0
+        else:
+            sortino = 0
+
+        # ==============================
+        # Max Drawdown
+        # ==============================
+
+        max_dd = self.drawdown.min()
+
+        return {
+            "sharpe": sharpe,
+            "sortino": sortino,
+            "max_dd": max_dd,
+            "cagr": cagr
+        }
+
+# === Fim do arquivo: ./src/backtest_dynamic.py ===
+
+# === Início do arquivo: ./src/backtest_institutional.py ===
+
+import numpy as np
+import pandas as pd
+
+
+class InstitutionalBacktest:
+    """
+    Backtest institucional completo:
+
+    ✔ Walk-forward rolling
+    ✔ Benchmark integrado
+    ✔ Vol targeting
+    ✔ Stop estrutural
+    ✔ Controle defensivo
+    """
+
+    def __init__(
+        self,
+        returns: pd.DataFrame,
+        model_class,
+        lookback: int = 252,
+        rebalance_frequency: int = 21,
+        target_vol: float = 0.15,
+        stop_drawdown: float = -0.25,
+        benchmark_mode: str = "equal_weight"
+    ):
+
+        self.returns = returns.copy()
+        self.model_class = model_class
+        self.lookback = lookback
+        self.rebalance_frequency = rebalance_frequency
+        self.target_vol = target_vol
+        self.stop_drawdown = stop_drawdown
+        self.benchmark_mode = benchmark_mode
+
+        self.portfolio_returns = None
+        self.benchmark_returns = None
+        self.equity_curve = None
+        self.benchmark_equity = None
+        self.drawdown = None
+
+        self._run()
+
+    # ==========================================================
+    # WALK-FORWARD ROLLING
+    # ==========================================================
+
+    def _run(self):
+
+        returns = self.returns
+        n = len(returns)
+
+        portfolio_returns = []
+        benchmark_returns = []
+        current_weights = None
+
+        peak_equity = 1.0
+        equity = 1.0
+
+        for t in range(self.lookback, n):
+
+            # ==========================================
+            # WALK FORWARD TRAINING WINDOW
+            # ==========================================
+
+            train_slice = returns.iloc[t - self.lookback:t]
+
+            # Rebalance
+            if (t - self.lookback) % self.rebalance_frequency == 0:
+
+                model = self.model_class(train_slice)
+
+                try:
+                    current_weights = model.get_probabilistic_weights()
+                except:
+                    current_weights = np.ones(train_slice.shape[1]) / train_slice.shape[1]
+
+                current_weights = np.array(current_weights)
+
+                if current_weights.sum() != 0:
+                    current_weights = current_weights / np.sum(np.abs(current_weights))
+
+            if current_weights is None:
+                continue
+
+            # ==========================================
+            # DAILY RETURN
+            # ==========================================
+
+            daily_ret = np.dot(current_weights, returns.iloc[t])
+
+            # ==========================================
+            # VOL TARGETING
+            # ==========================================
+
+            recent_returns = np.array(portfolio_returns[-60:]) if len(portfolio_returns) > 60 else np.array(portfolio_returns)
+
+            if len(recent_returns) > 10:
+                realized_vol = np.std(recent_returns) * np.sqrt(252)
+                if realized_vol > 0:
+                    scaling = self.target_vol / realized_vol
+                    daily_ret *= scaling
+
+            # ==========================================
+            # STOP ESTRUTURAL
+            # ==========================================
+
+            equity *= (1 + daily_ret)
+            peak_equity = max(peak_equity, equity)
+            dd = equity / peak_equity - 1
+
+            if dd < self.stop_drawdown:
+                daily_ret = 0  # vai para cash
+                equity = peak_equity  # trava perda
+
+            portfolio_returns.append(daily_ret)
+
+            # ==========================================
+            # BENCHMARK
+            # ==========================================
+
+            if self.benchmark_mode == "equal_weight":
+                bench_ret = returns.iloc[t].mean()
+            else:
+                bench_ret = returns.iloc[t].mean()
+
+            benchmark_returns.append(bench_ret)
+
+        # ==============================================
+        # SERIES
+        # ==============================================
+
+        index = returns.index[self.lookback:self.lookback + len(portfolio_returns)]
+
+        self.portfolio_returns = pd.Series(portfolio_returns, index=index)
+        self.benchmark_returns = pd.Series(benchmark_returns, index=index)
+
+        self.equity_curve = (1 + self.portfolio_returns).cumprod()
+        self.benchmark_equity = (1 + self.benchmark_returns).cumprod()
+
+        self.drawdown = self.equity_curve / self.equity_curve.cummax() - 1
+
+    # ==========================================================
+    # MÉTRICAS
+    # ==========================================================
+
+    def compute_metrics(self):
+
+        returns = self.portfolio_returns
+
+        if len(returns) < 2:
+            return {}
+
+        equity = self.equity_curve
+
+        total_return = equity.iloc[-1]
+        years = len(returns) / 252
+
+        cagr = total_return ** (1 / years) - 1 if years > 0 else 0
+
+        mean_ret = returns.mean() * 252
+        vol = returns.std() * np.sqrt(252)
+
+        sharpe = mean_ret / vol if vol > 0 else 0
+
+        downside = returns[returns < 0]
+        sortino = mean_ret / (downside.std() * np.sqrt(252)) if len(downside) > 0 else 0
+
+        max_dd = self.drawdown.min()
+
+        alpha = (self.portfolio_returns - self.benchmark_returns).mean() * 252
+
+        return {
+            "cagr": cagr,
+            "sharpe": sharpe,
+            "sortino": sortino,
+            "max_dd": max_dd,
+            "alpha": alpha
+        }
+
+# === Fim do arquivo: ./src/backtest_institutional.py ===
+
+# === Início do arquivo: ./src/benchmark.py ===
+
+import numpy as np
+
+
+def equal_weight_backtest(returns):
+
+    n_assets = returns.shape[1]
+    w = np.ones(n_assets) / n_assets
+
+    equity = (1 + returns @ w).cumprod()
+
+    return equity
+
+
+def single_asset_backtest(returns, asset_index=0):
+
+    equity = (1 + returns.iloc[:, asset_index]).cumprod()
+
+    return equity
+
+# === Fim do arquivo: ./src/benchmark.py ===
+
+# === Início do arquivo: ./src/data_loader.py ===
+
+# src/data_loader.py
+
+import yfinance as yf
+import numpy as np
+
+
+class DataLoader:
+
+    def __init__(self, tickers, period="5y"):
+        self.tickers = tickers
+        self.period = period
+
+    def load(self):
+        data = yf.download(self.tickers, period=self.period)
+
+        # Se vier MultiIndex
+        if isinstance(data.columns, tuple) or len(data.columns.names) > 1:
+            data = data["Close"]
+        else:
+            data = data["Close"]
+
+        returns = np.log(data / data.shift(1)).dropna()
+        return returns
+
+# === Fim do arquivo: ./src/data_loader.py ===
+
+# === Início do arquivo: ./src/evolution.py ===
+
+# src/evolution.py
+
+import numpy as np
+from multiprocessing import Pool
+
+def avaliar_modelo(args):
+    model_class, returns, params = args
+    model = model_class(returns, **params)
+    w = model.optimize()
+    r = returns.values @ w
+    score = np.mean(r) / np.std(r)
+    return score, params
+
+class EvolutionEngine:
+
+    def __init__(self, model_class, population):
+        self.model_class = model_class
+        self.population = population
+
+    def evolve(self, returns):
+
+        args = [(self.model_class, returns, p)
+                for p in self.population]
+
+        with Pool() as pool:
+            results = pool.map(avaliar_modelo, args)
+
+        results.sort(reverse=True, key=lambda x: x[0])
+        return results[:len(results)//2]
+    
+
+from multiprocessing import Pool
+
+
+def evolve_population(models):
+
+    with Pool() as pool:
+        results = pool.map(run_model, models)
+
+    return results
+
+# === Fim do arquivo: ./src/evolution.py ===
+
+# === Início do arquivo: ./src/hmm_regime.py ===
+
+# src/hmm_regime.py
+
+import numpy as np
+from hmmlearn.hmm import GaussianHMM
+
+
+class HMMRegimeDetector:
+
+    def __init__(self, n_regimes=3):
+        self.n_regimes = n_regimes
+        self.model = GaussianHMM(
+            n_components=n_regimes,
+            covariance_type="full",
+            n_iter=200
+        )
+
+    def fit(self, returns):
+        self.model.fit(returns.values)
+        hidden_states = self.model.predict(returns.values)
+        return hidden_states
+
+    def get_transition_matrix(self):
+        return self.model.transmat_
+
+    def posterior_probabilities(self, returns):
+        posteriors = self.model.predict_proba(returns.values)
+        return posteriors[-1]  # probabilidade do último período
+
+# === Fim do arquivo: ./src/hmm_regime.py ===
+
+# === Início do arquivo: ./src/hyperparameter_tuning.py ===
+
+import numpy as np
+
+
+def tune_parameters(model_class, returns):
+
+    best_score = -np.inf
+    best_params = None
+
+    for alpha in np.linspace(0.2, 1.0, 5):
+        for beta in np.linspace(0.2, 1.0, 5):
+            for gamma in np.linspace(0.2, 1.0, 5):
+
+                model = model_class(
+                    returns,
+                    alpha=alpha,
+                    beta=beta,
+                    gamma=gamma
+                )
+
+                weights = model.get_probabilistic_weights()
+                portfolio = returns.values @ weights
+                sharpe = np.mean(portfolio) / (np.std(portfolio) + 1e-12)
+
+                if sharpe > best_score:
+                    best_score = sharpe
+                    best_params = (alpha, beta, gamma)
+
+    return best_params
+
+# === Fim do arquivo: ./src/hyperparameter_tuning.py ===
+
+# === Início do arquivo: ./src/information.py ===
+
+# src/information.py
+
+import numpy as np
+from sklearn.metrics import mutual_info_score
+
+class InformationTheory:
+
+    @staticmethod
+    def entropy(w):
+        w = np.clip(w, 1e-12, None)
+        w = w / np.sum(w)
+        return -np.sum(w * np.log(w))
+
+    @staticmethod
+    def mutual_information(portfolio_returns, regimes):
+        bins = np.histogram_bin_edges(portfolio_returns, bins=5)
+        port_disc = np.digitize(portfolio_returns, bins)
+        regimes = regimes[-len(port_disc):]
+        return mutual_info_score(port_disc, regimes)
+
+# === Fim do arquivo: ./src/information.py ===
+
+# === Início do arquivo: ./src/information_causal.py ===
+
+import numpy as np
+from sklearn.feature_selection import mutual_info_regression
+
+
+class PredictiveInformation:
+
+    @staticmethod
+    def predictive_mi(portfolio_returns):
+
+        future_returns = np.roll(portfolio_returns, -1)
+
+        X = portfolio_returns[:-1].reshape(-1, 1)
+        y = future_returns[:-1]
+
+        return mutual_info_regression(X, y)[0]
+
+# === Fim do arquivo: ./src/information_causal.py ===
+
+# === Início do arquivo: ./src/metrics.py ===
+
+# src/regimes.py
+
+from sklearn.cluster import KMeans
+
+class RegimeDetector:
+
+    def __init__(self, n_regimes=3):
+        self.n_regimes = n_regimes
+
+    def detect(self, returns):
+        vol = returns.rolling(20).std().dropna()
+        model = KMeans(n_clusters=self.n_regimes, random_state=42)
+        regimes = model.fit_predict(vol)
+        return regimes[-len(returns):]
+
+# === Fim do arquivo: ./src/metrics.py ===
+
+# === Início do arquivo: ./src/montecarlo.py ===
+
+import numpy as np
+
+
+def simulate_regime_paths(P, current_state, T):
+
+    states = [current_state]
+
+    for _ in range(T):
+        next_state = np.random.choice(
+            len(P),
+            p=P[states[-1]]
+        )
+        states.append(next_state)
+
+    return states
+
+# === Fim do arquivo: ./src/montecarlo.py ===
+
+# === Início do arquivo: ./src/montecarlo_equity.py ===
+
+import numpy as np
+import pandas as pd
+
+
+def monte_carlo_equity(model, T=252, n_sim=1000):
+
+    regimes = model.hidden_states
+    transition = model.transition_matrix
+
+    regime_means = {}
+    regime_covs = {}
+
+    for k in range(model.n_regimes):
+        r = model.returns[regimes == k]
+        regime_means[k] = r.mean().values
+        regime_covs[k] = np.cov(r.values.T)
+
+    paths = []
+
+    for _ in range(n_sim):
+
+        state = model.get_current_regime()
+        equity = [1.0]
+
+        for _ in range(T):
+
+            mean = regime_means[state]
+            cov = regime_covs[state]
+
+            simulated_return = np.random.multivariate_normal(mean, cov)
+            portfolio_return = np.dot(simulated_return, model.regime_weights[state])
+
+            equity.append(equity[-1] * (1 + portfolio_return))
+
+            state = np.random.choice(
+                model.n_regimes,
+                p=transition[state]
+            )
+
+        paths.append(equity)
+
+    return pd.DataFrame(paths).T
+
+# === Fim do arquivo: ./src/montecarlo_equity.py ===
+
+# === Início do arquivo: ./src/phi_surface.py ===
+
+import numpy as np
+
+
+def phi_surface(
+    model,
+    grid_size=20,
+    mode="posterior",  # "posterior", "single"
+    regime_index=None
+):
+
+    alpha_vals = np.linspace(0.1, 2.0, grid_size)
+    gamma_vals = np.linspace(0.1, 2.0, grid_size)
+
+    Z = np.zeros((grid_size, grid_size))
+
+    # Probabilidades atuais
+    posterior = model.posterior_probs[-1]
+
+    # Se modo regime único
+    if mode == "single":
+        if regime_index is None:
+            regime_index = np.argmax(posterior)
+
+    for i, a in enumerate(alpha_vals):
+        for j, g in enumerate(gamma_vals):
+
+            model.alpha = a
+            model.gamma = g
+
+            w = model.get_probabilistic_weights()
+
+            if mode == "posterior":
+
+                # Φ esperado ponderado por probabilidade
+                phi_val = 0
+                for k in range(model.n_regimes):
+                    phi_val += posterior[k] * model.phi(w, k)
+
+            elif mode == "single":
+
+                phi_val = model.phi(w, regime_index)
+
+            else:
+                phi_val = model.phi(w, np.argmax(posterior))
+
+            Z[i, j] = phi_val
+
+    return alpha_vals, gamma_vals, Z
+
+# === Fim do arquivo: ./src/phi_surface.py ===
+
+# === Início do arquivo: ./src/quant_fund_engine.py ===
+
+import numpy as np
+import pandas as pd
+
+from hmmlearn.hmm import GaussianHMM
+from arch import arch_model
+from sklearn.linear_model import Ridge
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.covariance import LedoitWolf
+from scipy.optimize import minimize
+from scipy.stats import norm
+
+
+class QuantFundEngine:
+
+    def __init__(
+        self,
+        returns: pd.DataFrame,
+        window=504,
+        target_vol=0.15,
+        cvar_limit=0.05
+    ):
+
+        self.returns = returns.dropna()
+        self.window = window
+        self.target_vol = target_vol
+        self.cvar_limit = cvar_limit
+
+        self.weights_history = []
+        self.equity_curve = None
+
+    # ==========================================================
+    # 1️⃣ REGIME PROBABILÍSTICO
+    # ==========================================================
+
+    def fit_hmm(self, data):
+
+        hmm = GaussianHMM(
+            n_components=3,
+            covariance_type="diag",
+            n_iter=200,
+            random_state=42
+        )
+
+        hmm.fit(data.values)
+        probs = hmm.predict_proba(data.values)
+
+        return probs[-1]
+
+    # ==========================================================
+    # 2️⃣ VOL CONDICIONAL GARCH
+    # ==========================================================
+
+    def estimate_vol(self, series):
+
+        model = arch_model(series * 100, p=1, q=1)
+        res = model.fit(disp="off")
+
+        vol = res.conditional_volatility.iloc[-1] / 100
+        return vol
+
+    # ==========================================================
+    # 3️⃣ ENSEMBLE FORECAST
+    # ==========================================================
+
+    def forecast_returns(self, data):
+
+        X = data.shift(1).dropna()
+        y = data.loc[X.index]
+
+        ridge = Ridge()
+        rf = RandomForestRegressor(n_estimators=50)
+
+        ridge.fit(X, y)
+        rf.fit(X, y)
+
+        pred_ridge = ridge.predict(data.iloc[-1:].values)
+        pred_rf = rf.predict(data.iloc[-1:].values)
+
+        forecast = 0.5 * pred_ridge + 0.5 * pred_rf
+
+        return forecast.flatten()
+
+    # ==========================================================
+    # 4️⃣ CVaR HARD CONSTRAINT
+    # ==========================================================
+
+    def cvar_constraint(self, weights, returns):
+
+        portfolio_returns = returns @ weights
+        alpha = 0.05
+
+        var = np.percentile(portfolio_returns, 100 * alpha)
+        cvar = portfolio_returns[portfolio_returns <= var].mean()
+
+        return -cvar - self.cvar_limit
+
+    # ==========================================================
+    # 5️⃣ OPTIMIZAÇÃO INSTITUCIONAL
+    # ==========================================================
+
+    def optimize(self, mu, cov, returns_window):
+
+        n = len(mu)
+
+        def objective(w):
+            port_return = w @ mu
+            port_vol = np.sqrt(w @ cov @ w)
+            return -(port_return / (port_vol + 1e-8))
+
+        constraints = (
+            {'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
+            {'type': 'ineq', 'fun': lambda w: self.cvar_constraint(w, returns_window)}
+        )
+
+        bounds = [(0, 1) for _ in range(n)]
+
+        result = minimize(
+            objective,
+            np.ones(n) / n,
+            bounds=bounds,
+            constraints=constraints
+        )
+
+        return result.x
+
+    # ==========================================================
+    # 6️⃣ WALK-FORWARD REAL
+    # ==========================================================
+
+    def run(self):
+
+        equity = [1.0]
+
+        for t in range(self.window, len(self.returns) - 1):
+
+            window_data = self.returns.iloc[t - self.window:t]
+
+            # Regime
+            regime_probs = self.fit_hmm(window_data)
+
+            # Forecast
+            mu = self.forecast_returns(window_data)
+
+            # Cov robusta
+            lw = LedoitWolf()
+            cov = lw.fit(window_data).covariance_
+
+            # Vol scaling
+            vol = np.sqrt(np.diag(cov))
+            mu = mu / (vol + 1e-8)
+
+            # Optimize
+            weights = self.optimize(mu, cov, window_data.values)
+
+            # Vol targeting
+            port_vol = np.sqrt(weights @ cov @ weights)
+
+            if port_vol > 0:
+                scale = self.target_vol / port_vol
+                weights *= scale
+
+            self.weights_history.append(weights)
+
+            # Retorno fora da amostra
+            ret = self.returns.iloc[t + 1].values @ weights
+            equity.append(equity[-1] * (1 + ret))
+
+        self.equity_curve = pd.Series(
+            equity,
+            index=self.returns.index[self.window - 1:]
+        )
+
+        return self.equity_curve
+
+# === Fim do arquivo: ./src/quant_fund_engine.py ===
+
+# === Início do arquivo: ./src/qwan_complexity.py ===
+
+import numpy as np
+
+
+class Autopoiesis:
+
+    def closure_score(self, returns, weights):
+
+        portfolio = returns.values @ weights
+        stability = 1 / (1 + np.std(portfolio))
+
+        return stability
+    
+class ComplexityAbsorption:
+
+    def absorption(self, portfolio_returns, environment_vol):
+
+        internal_complexity = np.std(portfolio_returns)
+        external_complexity = environment_vol
+
+        return internal_complexity / (1 + external_complexity)
+
+# === Fim do arquivo: ./src/qwan_complexity.py ===
+
+# === Início do arquivo: ./src/qwan_core.py ===
+
+import numpy as np
+from sklearn.metrics import mutual_info_score
+
+
+class QWANCore:
+
+    def __init__(self, returns, regimes=None):
+        self.returns = returns
+        self.regimes = regimes
+
+    # --------------------------------------------------
+    # 2. ENTROPIA ESTRUTURADA
+    # --------------------------------------------------
+    def structured_entropy(self, weights):
+
+        portfolio_returns = self.returns.values @ weights
+        p = np.abs(portfolio_returns)
+        p = p / (np.sum(p) + 1e-12)
+
+        entropy = -np.sum(p * np.log(p + 1e-12))
+        return entropy
+
+    # --------------------------------------------------
+    # 3. COERÊNCIA ESTRUTURAL (I(X;M))
+    # --------------------------------------------------
+    def structural_coherence(self, weights):
+
+        if self.regimes is None:
+            return 0
+
+        portfolio_returns = self.returns.values @ weights
+
+        disc = np.digitize(
+            portfolio_returns,
+            bins=np.histogram(portfolio_returns, bins=10)[1]
+        )
+
+        min_len = min(len(disc), len(self.regimes))
+        return mutual_info_score(
+            disc[:min_len],
+            self.regimes[:min_len]
+        )
+    
+import numpy as np
+from sklearn.metrics import mutual_info_score
+
+
+class QWANCore:
+
+    def __init__(self, returns, regimes=None):
+        self.returns = returns
+        self.regimes = regimes
+
+    # --------------------------------------------------
+    # 2. ENTROPIA ESTRUTURADA
+    # --------------------------------------------------
+    def structured_entropy(self, weights):
+
+        portfolio_returns = self.returns.values @ weights
+        p = np.abs(portfolio_returns)
+        p = p / (np.sum(p) + 1e-12)
+
+        entropy = -np.sum(p * np.log(p + 1e-12))
+        return entropy
+
+    # --------------------------------------------------
+    # 3. COERÊNCIA ESTRUTURAL (I(X;M))
+    # --------------------------------------------------
+    def structural_coherence(self, weights):
+
+        if self.regimes is None:
+            return 0
+
+        portfolio_returns = self.returns.values @ weights
+
+        disc = np.digitize(
+            portfolio_returns,
+            bins=np.histogram(portfolio_returns, bins=10)[1]
+        )
+
+        min_len = min(len(disc), len(self.regimes))
+        return mutual_info_score(
+            disc[:min_len],
+            self.regimes[:min_len]
+        )
+
+# === Fim do arquivo: ./src/qwan_core.py ===
+
+# === Início do arquivo: ./src/qwan_dynamics.py ===
+
+import numpy as np
+
+
+class QWANDynamics:
+
+    def __init__(self, mobility=None):
+        self.L = mobility
+
+    def gradient_flow(self, grad_phi):
+
+        if self.L is None:
+            self.L = np.eye(len(grad_phi))
+
+        return - self.L @ grad_phi
+
+    def dissipative_lagrangian(self, x_dot, grad_phi):
+
+        L_inv = np.linalg.inv(self.L)
+        term = x_dot + self.L @ grad_phi
+
+        return 0.5 * term.T @ L_inv @ term
+
+# === Fim do arquivo: ./src/qwan_dynamics.py ===
+
+# === Início do arquivo: ./src/qwan_evolution.py ===
+
+import numpy as np
+
+
+class QWANEvolution:
+
+    def replicate(self, population, fitness_scores):
+
+        sorted_idx = np.argsort(fitness_scores)[::-1]
+        survivors = population[sorted_idx[:len(population)//2]]
+
+        new_population = survivors.copy()
+
+        for w in survivors:
+            mutation = w + np.random.normal(0, 0.02, len(w))
+            mutation = np.clip(mutation, 0, 1)
+            mutation /= np.sum(mutation)
+            new_population = np.vstack([new_population, mutation])
+
+        return new_population
+
+# === Fim do arquivo: ./src/qwan_evolution.py ===
+
+# === Início do arquivo: ./src/qwan_meta.py ===
+
+import numpy as np
+
+
+class MetaStability:
+
+    def is_metastable(self, phi_values):
+
+        grad = np.gradient(phi_values)
+        return np.abs(grad[-1]) < 1e-3
+
+# === Fim do arquivo: ./src/qwan_meta.py ===
+
+# === Início do arquivo: ./src/qwan_model.py ===
+
+# src/qwan_model.py
+
+import numpy as np
+import pandas as pd
+from scipy.optimize import minimize
+
+from .risk import RiskMetrics
+from .information import InformationTheory
+from .regimes import RegimeDetector
+
+
+class MarketQWAN:
+
+    def __init__(self, returns, alpha=0.5, beta=0.5):
+        """
+        returns: DataFrame de retornos logarítmicos
+        alpha: peso da entropia (liberdade estrutural)
+        beta: peso da informação mútua (coerência com regime)
+        """
+
+        self.returns = returns.copy()
+        self.n_assets = returns.shape[1]
+        self.alpha = alpha
+        self.beta = beta
+
+        # Detectar regimes
+        self.regimes = RegimeDetector().detect(self.returns)
+
+        # Garantir alinhamento inicial
+        self._align_data()
+
+    # ==========================================================
+    # ALINHAMENTO TEMPORAL
+    # ==========================================================
+
+    def _align_data(self):
+        """
+        Garante que retornos e regimes tenham mesmo índice.
+        Remove períodos inválidos.
+        """
+
+        common_index = self.returns.index.intersection(self.regimes.index)
+
+        self.returns = self.returns.loc[common_index]
+        self.regimes = self.regimes.loc[common_index]
+
+    # ==========================================================
+    # ENERGIA DE RISCO (CVaR)
+    # ==========================================================
+
+    def risk_energy(self, w):
+        portfolio_returns = self.returns.values @ w
+        return abs(RiskMetrics.cvar(portfolio_returns))
+
+    # ==========================================================
+    # FUNCIONAL Φ_market
+    # ==========================================================
+
+    def phi(self, w):
+
+        # Normalizar pesos
+        w = np.clip(w, 1e-12, None)
+        w = w / np.sum(w)
+
+        portfolio_returns = self.returns.values @ w
+
+        # --- Energia (risco extremo)
+        G = self.risk_energy(w)
+
+        # --- Entropia estrutural
+        H = InformationTheory.entropy(w)
+
+        # --- Informação mútua (regime × retorno)
+        I = InformationTheory.mutual_information(
+            portfolio_returns,
+            self.regimes.values
+        )
+
+        # Φ = Energia - α Entropia + β Informação
+        phi_value = G - self.alpha * H + self.beta * I
+
+        return phi_value
+
+    # ==========================================================
+    # OTIMIZAÇÃO
+    # ==========================================================
+
+    def optimize(self):
+
+        def objective(w):
+            return self.phi(w)
+
+        # Restrição: soma dos pesos = 1
+        constraints = ({
+            'type': 'eq',
+            'fun': lambda w: np.sum(w) - 1
+        })
+
+        # Sem short (long-only)
+        bounds = [(0, 1)] * self.n_assets
+
+        # Inicialização uniforme
+        w0 = np.ones(self.n_assets) / self.n_assets
+
+        result = minimize(
+            objective,
+            w0,
+            method='SLSQP',
+            bounds=bounds,
+            constraints=constraints,
+            options={'maxiter': 200}
+        )
+
+        if not result.success:
+            print("⚠ Otimização não convergiu:", result.message)
+
+        w_opt = np.clip(result.x, 0, None)
+        w_opt /= np.sum(w_opt)
+
+        return w_opt
+
+# === Fim do arquivo: ./src/qwan_model.py ===
+
+# === Início do arquivo: ./src/qwan_pareto.py ===
+
+import numpy as np
+
+
+class ParetoQWAN:
+
+    def pareto_score(self, entropy, coherence):
+
+        return entropy / (1 + coherence)
+
+# === Fim do arquivo: ./src/qwan_pareto.py ===
+
+# === Início do arquivo: ./src/qwan_regime_model.py ===
+
+import numpy as np
+import pandas as pd
+from hmmlearn.hmm import GaussianHMM
+from sklearn.covariance import LedoitWolf
+
+
+class RegimeAwareQWAN:
+
+    def __init__(
+        self,
+        returns: pd.DataFrame,
+        n_regimes=3,
+        alpha=0.6,
+        gamma=0.5,
+        target_vol=0.15,
+        lookback_momentum=60
+    ):
+
+        self.returns = returns.dropna()
+        self.n_regimes = n_regimes
+        self.alpha = alpha
+        self.gamma = gamma
+        self.target_vol = target_vol
+        self.lookback_momentum = lookback_momentum
+
+        self._fit_hmm()
+        self._compute_posteriors()
+        self._compute_regime_weights()  # 🔥 IMPORTANTE
+
+    # ==========================================================
+    # HMM
+    # ==========================================================
+
+    def _fit_hmm(self):
+
+        self.hmm = GaussianHMM(
+            n_components=self.n_regimes,
+            covariance_type="diag",
+            n_iter=300,
+            random_state=42
+        )
+
+        self.hmm.fit(self.returns.values)
+
+        self.hidden_states = self.hmm.predict(self.returns.values)
+        self.posterior_probs = self.hmm.predict_proba(self.returns.values)
+
+        self.transition_matrix = self.hmm.transmat_
+        self.start_prob = self.hmm.startprob_
+
+    def _compute_posteriors(self):
+        self.posterior_probs = self.hmm.predict_proba(self.returns.values)
+
+    # ==========================================================
+    # COMPUTAR PESOS POR REGIME
+    # ==========================================================
+
+    def _compute_regime_weights(self):
+
+        self.regime_weights = {}
+
+        for k in range(self.n_regimes):
+            self.regime_weights[k] = self.optimize_for_regime(k)
+
+    # ==========================================================
+    # REGIME ATUAL
+    # ==========================================================
+
+    def get_current_regime(self):
+        return np.argmax(self.posterior_probs[-1])
+
+    def get_current_regime_weights(self):
+        regime = self.get_current_regime()
+        return self.regime_weights[regime]
+
+    # ==========================================================
+    # ENTROPIA
+    # ==========================================================
+
+    def entropy(self, weights):
+        weights = np.clip(weights, 1e-8, None)
+        weights = weights / np.sum(weights)
+        return -np.sum(weights * np.log(weights))
+
+    # ==========================================================
+    # COVARIÂNCIA ROBUSTA
+    # ==========================================================
+
+    def robust_covariance(self, data):
+
+        lw = LedoitWolf()
+        cov = lw.fit(data).covariance_
+
+        eigvals, eigvecs = np.linalg.eigh(cov)
+        eigvals = np.clip(eigvals, 1e-6, None)
+
+        cov = eigvecs @ np.diag(eigvals) @ eigvecs.T
+
+        return cov
+
+    # ==========================================================
+    # MÉDIA BAYESIANA
+    # ==========================================================
+
+    def bayesian_mean(self, data):
+
+        mu_sample = data.mean().values
+        tau = 0.1
+        mu_bayes = mu_sample / (1 + tau)
+
+        return mu_bayes
+
+    # ==========================================================
+    # MOMENTUM
+    # ==========================================================
+
+    def momentum(self, data):
+
+        lookback = min(self.lookback_momentum, len(data))
+        return data.iloc[-lookback:].mean().values
+
+    # ==========================================================
+    # Φ
+    # ==========================================================
+
+    def phi(self, weights, regime):
+
+        mask = self.hidden_states == regime
+
+        if np.sum(mask) < 20:
+            return -1e6
+
+        regime_data = self.returns.iloc[mask]
+
+        mu = self.bayesian_mean(regime_data)
+        cov = self.robust_covariance(regime_data)
+
+        port_return = weights @ mu
+        port_var = weights @ cov @ weights
+
+        H = self.entropy(weights)
+
+        return port_return - self.alpha * H - 0.5 * port_var
+
+    # ==========================================================
+    # PESOS PROBABILÍSTICOS
+    # ==========================================================
+
+    def get_probabilistic_weights(self):
+
+        posterior = self.posterior_probs[-1]
+
+        weights_matrix = np.array(
+            [self.regime_weights[k] for k in range(self.n_regimes)]
+        )
+
+        final_weights = np.sum(
+            posterior[:, None] * weights_matrix,
+            axis=0
+        )
+
+        final_weights = np.clip(final_weights, 0, None)
+
+        if final_weights.sum() == 0:
+            final_weights = np.ones_like(final_weights)
+
+        final_weights /= final_weights.sum()
+
+        return final_weights
+
+    # ==========================================================
+    # OTIMIZAÇÃO POR REGIME
+    # ==========================================================
+
+    def optimize_for_regime(self, regime):
+
+        mask = self.hidden_states == regime
+
+        if np.sum(mask) < 20:
+            return np.ones(self.returns.shape[1]) / self.returns.shape[1]
+
+        regime_data = self.returns.iloc[mask]
+
+        mu = self.bayesian_mean(regime_data)
+        cov = self.robust_covariance(regime_data)
+        mom = self.momentum(regime_data)
+
+        score = mu + self.gamma * mom
+
+        inv_cov = np.linalg.pinv(cov)
+
+        raw_weights = inv_cov @ score
+        raw_weights = np.clip(raw_weights, 0, None)
+
+        if raw_weights.sum() == 0:
+            raw_weights = np.ones_like(raw_weights)
+
+        weights = raw_weights / raw_weights.sum()
+
+        # Target Vol Scaling
+        port_vol = np.sqrt(weights @ cov @ weights)
+
+        if port_vol > 0:
+            scale = self.target_vol / port_vol
+            weights = weights * scale
+
+        return weights
+
+# === Fim do arquivo: ./src/qwan_regime_model.py ===
+
+# === Início do arquivo: ./src/regime_model.py ===
+
+import numpy as np
+from hmmlearn.hmm import GaussianHMM
+
+
+class RobustHMM:
+
+    def __init__(self, n_regimes=3):
+        self.n_regimes = n_regimes
+        self.model = None
+
+    def _robust_transform(self, X):
+        # Winsorize extremos
+        lower = np.percentile(X, 1, axis=0)
+        upper = np.percentile(X, 99, axis=0)
+        return np.clip(X, lower, upper)
+
+    def fit(self, returns):
+
+        X = returns.values
+        X = self._robust_transform(X)
+
+        self.model = GaussianHMM(
+            n_components=self.n_regimes,
+            covariance_type="full",
+            n_iter=200
+        )
+
+        self.model.fit(X)
+
+    def predict(self, returns):
+        X = self._robust_transform(returns.values)
+        return self.model.predict(X)
+
+    def predict_proba(self, returns):
+        X = self._robust_transform(returns.values)
+        return self.model.predict_proba(X)
+
+    def transition_matrix(self):
+        return self.model.transmat_
+
+# === Fim do arquivo: ./src/regime_model.py ===
+
+# === Início do arquivo: ./src/regime_student.py ===
+
+import numpy as np
+from pomegranate import HiddenMarkovModel, StudentTDistribution
+
+
+class StudentTHMM:
+
+    def __init__(self, n_regimes=3):
+        self.n_regimes = n_regimes
+        self.model = None
+
+    def fit(self, returns):
+
+        self.model = HiddenMarkovModel.from_samples(
+            StudentTDistribution,
+            n_components=self.n_regimes,
+            X=returns.values
+        )
+
+    def predict(self, returns):
+        return np.array(self.model.predict(returns.values))
+
+    def predict_proba(self, returns):
+        return np.array(self.model.predict_proba(returns.values))
+
+    def transition_matrix(self):
+        return self.model.dense_transition_matrix()
+
+# === Fim do arquivo: ./src/regime_student.py ===
+
+# === Início do arquivo: ./src/regimes.py ===
+
+# src/regimes.py
+
+from sklearn.cluster import KMeans
+
+class RegimeDetector:
+
+    def __init__(self, n_regimes=3):
+        self.n_regimes = n_regimes
+
+    def detect(self, returns):
+
+        vol = returns.rolling(20).std()
+
+        # remover NaN
+        valid = vol.dropna()
+
+        model = KMeans(n_clusters=self.n_regimes, random_state=42)
+        regimes = model.fit_predict(valid)
+
+        # criar vetor completo alinhado
+        full_regimes = returns.index.to_series().copy()
+        full_regimes[:] = None
+        full_regimes.loc[valid.index] = regimes
+
+        # remover períodos sem regime
+        return full_regimes.dropna().astype(int)
+
+# === Fim do arquivo: ./src/regimes.py ===
+
+# === Início do arquivo: ./src/report.py ===
+
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.pagesizes import A4
+
+
+def generate_pdf(filename, metrics):
+    doc = SimpleDocTemplate(filename, pagesize=A4)
+    elements = []
+    styles = getSampleStyleSheet()
+
+    elements.append(Paragraph("Market-QWAN Institutional Report", styles["Title"]))
+
+    for k, v in metrics.items():
+        elements.append(Paragraph(f"{k}: {round(v,4)}", styles["Normal"]))
+
+    doc.build(elements)
+
+# === Fim do arquivo: ./src/report.py ===
+
+# === Início do arquivo: ./src/risk.py ===
+
+import numpy as np
+
+
+class RiskMetrics:
+
+    @staticmethod
+    def sharpe(returns):
+        return np.mean(returns) / (np.std(returns) + 1e-12) * np.sqrt(252)
+
+    @staticmethod
+    def sortino(returns):
+        downside = returns[returns < 0]
+        return np.mean(returns) / (np.std(downside) + 1e-12) * np.sqrt(252)
+
+    @staticmethod
+    def max_drawdown(equity):
+        peak = np.maximum.accumulate(equity)
+        return np.min(equity / peak - 1)
+
+    @staticmethod
+    def cvar(returns, alpha=0.05):
+        var = np.quantile(returns, alpha)
+        return np.mean(returns[returns <= var])
+
+# === Fim do arquivo: ./src/risk.py ===
+
+# === Início do arquivo: ./src/stress_test.py ===
+
+import numpy as np
+
+
+def stress_test(portfolio_returns, shock=-0.2):
+    stressed = portfolio_returns.copy()
+    stressed.iloc[0] += shock
+    equity = (1 + stressed).cumprod()
+    return equity
+
+# === Fim do arquivo: ./src/stress_test.py ===
+
+# === Início do arquivo: ./src/turnover.py ===
+
+import numpy as np
+
+
+def calculate_turnover(weight_history):
+    turnover = 0
+    for i in range(1, len(weight_history)):
+        turnover += np.sum(np.abs(weight_history[i] - weight_history[i-1]))
+    return turnover / len(weight_history)
+
+# === Fim do arquivo: ./src/turnover.py ===
+
+# === Início do arquivo: ./src/utils.py ===
+
+
+
+# === Fim do arquivo: ./src/utils.py ===
+
+# === Início do arquivo: ./src/walk_forward.py ===
+
+import pandas as pd
+
+
+def walk_forward(model_class, returns, window=252, step=21):
+
+    weights_history = []
+
+    for start in range(0, len(returns) - window, step):
+
+        train = returns.iloc[start:start + window]
+        model = model_class(train)
+        weights = model.get_probabilistic_weights()
+
+        weights_history.append(weights)
+
+    return pd.DataFrame(weights_history)
+
+# === Fim do arquivo: ./src/walk_forward.py ===
+
+# === Início do arquivo: ./src/walkforward_regime.py ===
+
+# src/walkforward_regime.py
+
+import numpy as np
+from .qwan_regime_model import RegimeAwareQWAN
+
+
+class WalkForwardRegime:
+
+    def __init__(self,
+                 train_window=750,
+                 test_window=125,
+                 n_regimes=3,
+                 alpha=0.5,
+                 gamma=0.5):
+
+        self.train_window = train_window
+        self.test_window = test_window
+        self.n_regimes = n_regimes
+        self.alpha = alpha
+        self.gamma = gamma
+
+    def run(self, returns):
+
+        portfolio_returns = []
+
+        for start in range(
+            0,
+            len(returns) - self.train_window - self.test_window,
+            self.test_window
+        ):
+
+            train = returns.iloc[start:start+self.train_window]
+            test = returns.iloc[
+                start+self.train_window:
+                start+self.train_window+self.test_window
+            ]
+
+            model = RegimeAwareQWAN(
+                train,
+                n_regimes=self.n_regimes,
+                alpha=self.alpha,
+                gamma=self.gamma
+            )
+
+            weights = model.get_probabilistic_weights()
+
+            test_returns = test.values @ weights
+
+            portfolio_returns.extend(test_returns)
+
+        return np.array(portfolio_returns)
+
+# === Fim do arquivo: ./src/walkforward_regime.py ===
+

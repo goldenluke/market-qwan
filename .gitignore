@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+
+# Virtualenv
+market-qwan-env/
+venv/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Dados
+*.csv
+*.xlsx
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit cache
+.streamlit/
+
+# Logs
+*.log
