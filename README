@@ -1,13 +1,15 @@
 # 🏦 Market-QWAN
 ## Plataforma Quantitativa Institucional Multi-Regime
 
-O **Market-QWAN** é uma plataforma de pesquisa e desenvolvimento de estratégias quantitativas baseada em:
+O **Market-QWAN** é uma plataforma de pesquisa e desenvolvimento de estratégias quantitativas com foco em robustez estrutural, adaptação multi-regime e controle explícito de risco.
+
+O sistema combina:
 
 - Modelagem multi-regime (Hidden Markov Models)
 - Walk-forward rolling real
 - Controle estrutural de risco (CVaR + Stop estrutural)
 - Target volatility
-- Superfície funcional Φ (entropia × momentum)
+- Funcional estrutural Φ (entropia × momentum)
 - Simulação Monte Carlo regime-switching
 - Backtest institucional comparativo
 - Engine estilo fundo quantitativo
@@ -21,12 +23,12 @@ O sistema **não busca apenas maximizar retorno**.
 Ele busca:
 
 - Robustez estrutural
-- Adaptação multi-regime
+- Adaptação a múltiplos regimes
 - Controle explícito de risco
 - Sobrevivência sob múltiplos futuros
 - Equilíbrio entre liberdade configuracional e coerência estrutural
 
-Inspirado no conceito de **Qualidade Sem Nome (QWAN)** aplicado ao mercado.
+Inspirado no conceito de **Qualidade Sem Nome (QWAN)** aplicado ao mercado financeiro.
 
 ---
 
@@ -35,24 +37,24 @@ Inspirado no conceito de **Qualidade Sem Nome (QWAN)** aplicado ao mercado.
 ## 1️⃣ Modelo Multi-Regime
 
 - Hidden Markov Model (HMM)
-- Detecção de estados latentes de mercado
+- Identificação de estados latentes de mercado
 - Posterior probabilístico
-- Transição entre regimes
+- Matriz de transição entre regimes
 
-## 2️⃣ Funcional Φ (QWAN)
+## 2️⃣ Funcional Estrutural Φ
 
 O funcional estrutural é definido como:
 
-\[
-\Phi = G - \alpha H - \gamma \mu
-\]
+Phi = G − alpha * H − gamma * mu
 
 Onde:
 
-- \( G \) = ganho esperado ajustado por risco
-- \( H \) = entropia estruturada dos pesos
-- \( \mu \) = momentum condicional
-- \( \alpha, \gamma \) = parâmetros estruturais
+- G = ganho esperado ajustado por risco
+- H = entropia estruturada dos pesos
+- mu = momentum condicional
+- alpha, gamma = parâmetros estruturais
+
+Esse funcional equilibra retorno, diversificação estrutural e tendência.
 
 ---
 
@@ -62,10 +64,12 @@ Implementa:
 
 - Walk-forward rolling real
 - Rebalanceamento periódico
-- CVaR constraint
-- Target volatility scaling
+- Restrição de CVaR
+- Volatility targeting
 - Stop estrutural
 - Benchmark comparativo
+
+Simula comportamento próximo a um fundo quantitativo institucional.
 
 ---
 
@@ -73,10 +77,10 @@ Implementa:
 
 - 📈 Equity Curve vs Benchmark
 - 📉 Drawdown
-- 📊 Rolling Sharpe & Alpha
-- 🧠 Regime detection
+- 📊 Rolling Sharpe & Rolling Alpha
+- 🧠 Detecção de Regimes
 - 🧮 Superfície Φ 3D
-- ⚠ Stress test histórico
+- ⚠ Stress Test Histórico
 - 🎲 Monte Carlo regime-switching
 - 🏦 Engine estilo fundo quantitativo
 
@@ -88,8 +92,8 @@ Implementa:
 market-qwan/
 │
 ├── dashboard.py
-├── main.py
 ├── dash_app.py
+├── main.py
 ├── requirements.txt
 ├── README.md
 │
@@ -108,16 +112,16 @@ market-qwan/
 
 # 🚀 Instalação
 
-## 1️⃣ Criar ambiente virtual
+## Criar ambiente virtual
 
-```bash
+```
 python3 -m venv market-qwan-env
 source market-qwan-env/bin/activate
 ```
 
-## 2️⃣ Instalar dependências
+## Instalar dependências
 
-```bash
+```
 pip install -r requirements.txt
 ```
 
@@ -125,7 +129,7 @@ pip install -r requirements.txt
 
 # ▶ Rodar Backtest Local
 
-```bash
+```
 python main.py
 ```
 
@@ -133,7 +137,7 @@ python main.py
 
 # ▶ Rodar Dashboard Streamlit
 
-```bash
+```
 streamlit run dashboard.py
 ```
 
@@ -141,7 +145,7 @@ streamlit run dashboard.py
 
 # ▶ Rodar Dashboard Dash
 
-```bash
+```
 python dash_app.py
 ```
 
@@ -163,21 +167,21 @@ python dash_app.py
 
 # ⚠ Limitações Científicas (Honestidade Epistemológica)
 
-- Shannon ≠ significado funcional
-- HMM assume gaussianidade
-- Parâmetros α e γ são fenomenológicos
-- Regime detection depende da janela histórica
-- Não há garantia de universalidade
+- Entropia de Shannon não representa significado funcional.
+- HMM assume gaussianidade condicional.
+- Parâmetros alpha e gamma são fenomenológicos.
+- Detecção de regime depende da janela histórica.
+- Não há garantia de universalidade estrutural.
 
-O sistema é uma **plataforma de pesquisa quantitativa**, não recomendação de investimento.
+Este projeto é uma **plataforma de pesquisa quantitativa**, não recomendação de investimento.
 
 ---
 
 # 🎯 Próximos Desenvolvimentos
 
 - Ensemble multi-estratégia
-- Bayesian regime inference
-- Deep learning temporal (TFT)
+- Inferência Bayesiana de regimes
+- Deep learning temporal
 - Capital allocation entre engines
 - Deploy SaaS
 - API institucional
@@ -187,10 +191,9 @@ O sistema é uma **plataforma de pesquisa quantitativa**, não recomendação de
 # 👨‍💻 Autor
 
 **Lucas Amaral Dourado**
-- Medicina — Universidade Federal do Tocantins
-- Ciência da Computação — Centro Universitário Internacional
-- Pesquisador em epidemiologia computacional
-- Interesse em sistemas complexos, biofísica e modelagem quantitativa
+Medicina — Universidade Federal do Tocantins
+Ciência da Computação — Centro Universitário Internacional
+Pesquisador em epidemiologia computacional
 
 LinkedIn:
 https://www.linkedin.com/in/lucas-amaral-dourado-b5939b2aa/
