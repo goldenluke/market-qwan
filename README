@@ -1,207 +1,181 @@
-# 🏦 Market-QWAN
-## Plataforma Quantitativa Institucional Multi-Regime
+# 🧠 Market-QWAN
+### Quantitative Workflow for Adaptive Neural Forecasting
 
-O **Market-QWAN** é uma plataforma de pesquisa e desenvolvimento de estratégias quantitativas com foco em robustez estrutural, adaptação multi-regime e controle explícito de risco.
+Market-QWAN is an experimental quantitative research platform for:
 
-O sistema combina:
+- 📈 Portfolio-level neural time series forecasting
+- 🧠 Regime-aware modeling
+- 🌐 Systemic risk monitoring
+- 📊 Interactive financial dashboards
 
-- Modelagem multi-regime (Hidden Markov Models)
-- Walk-forward rolling real
-- Controle estrutural de risco (CVaR + Stop estrutural)
-- Target volatility
-- Funcional estrutural Φ (entropia × momentum)
-- Simulação Monte Carlo regime-switching
-- Backtest institucional comparativo
-- Engine estilo fundo quantitativo
+The architecture separates **model training**, **visualization**, and **inference**, ensuring stability and modularity.
 
 ---
 
-# 📘 Filosofia do Sistema
+# 🚀 Features
 
-O sistema **não busca apenas maximizar retorno**.
+## 🔮 Neural Forecast
+- NHITS-based neural time series forecasting (NeuralForecast)
+- Configurable:
+  - Tickers
+  - Input window (context size)
+  - Forecast horizon
+- Model persistence (`.pkl`)
+- Portfolio-level expected return estimation
 
-Ele busca:
+## 🧠 Systemic Risk Monitor
+- Eigenvalue stress (λ_max)
+- Correlation heatmap
+- Rolling market susceptibility
+- Network stress index
 
-- Robustez estrutural
-- Adaptação a múltiplos regimes
-- Controle explícito de risco
-- Sobrevivência sob múltiplos futuros
-- Equilíbrio entre liberdade configuracional e coerência estrutural
+## 🌐 External Trainer Interface
+- Flask-based training server
+- Tailwind-powered UI
+- Dynamic model listing
+- Asynchronous training execution
 
-Inspirado no conceito de **Qualidade Sem Nome (QWAN)** aplicado ao mercado financeiro.
-
----
-
-# 🧠 Arquitetura
-
-## 1️⃣ Modelo Multi-Regime
-
-- Hidden Markov Model (HMM)
-- Identificação de estados latentes de mercado
-- Posterior probabilístico
-- Matriz de transição entre regimes
-
-## 2️⃣ Funcional Estrutural Φ
-
-O funcional estrutural é definido como:
-
-Phi = G − alpha * H − gamma * mu
-
-Onde:
-
-- G = ganho esperado ajustado por risco
-- H = entropia estruturada dos pesos
-- mu = momentum condicional
-- alpha, gamma = parâmetros estruturais
-
-Esse funcional equilibra retorno, diversificação estrutural e tendência.
+## 📊 Streamlit Dashboard
+- Clean visual interface
+- Forecast visualization
+- Model selection dropdown
+- Decoupled from training engine
 
 ---
 
-## 3️⃣ QuantFundEngine
+# 🏗 Architecture
 
-Implementa:
+Streamlit (Visualization Only)
+        ↓
+Flask Trainer Server
+        ↓
+train_forecast.py (CLI)
+        ↓
+models/*.pkl
 
-- Walk-forward rolling real
-- Rebalanceamento periódico
-- Restrição de CVaR
-- Volatility targeting
-- Stop estrutural
-- Benchmark comparativo
-
-Simula comportamento próximo a um fundo quantitativo institucional.
-
----
-
-# 📊 Funcionalidades do Dashboard
-
-- 📈 Equity Curve vs Benchmark
-- 📉 Drawdown
-- 📊 Rolling Sharpe & Rolling Alpha
-- 🧠 Detecção de Regimes
-- 🧮 Superfície Φ 3D
-- ⚠ Stress Test Histórico
-- 🎲 Monte Carlo regime-switching
-- 🏦 Engine estilo fundo quantitativo
+This prevents:
+- Streamlit crashes during heavy training
+- Torch subprocess conflicts
+- Runtime instability
 
 ---
 
-# 🏗 Estrutura do Projeto
+# 📂 Project Structure
 
-```
 market-qwan/
 │
-├── dashboard.py
-├── dash_app.py
-├── main.py
+├── dashboard.py              # Streamlit dashboard
+├── trainer_server.py         # Flask API + Trainer UI
+├── train_forecast.py         # CLI training script
+├── models/                   # Saved trained models (.pkl)
+├── templates/
+│   └── trainer.html          # Tailwind trainer interface
+├── src/
+│   ├── qwan_forecast_model.py
+│   ├── qwan_regime_model.py
+│   └── ...
 ├── requirements.txt
-├── README.md
-│
-└── src/
-    ├── quant_fund_engine.py
-    ├── qwan_regime_model.py
-    ├── backtest_institutional.py
-    ├── data_loader.py
-    ├── attribution.py
-    ├── phi_surface.py
-    ├── stress_test.py
-    ├── montecarlo_equity.py
-```
+└── README.md
 
 ---
 
-# 🚀 Instalação
+# ⚙️ Installation
 
-## Criar ambiente virtual
+## 1️⃣ Clone Repository
 
-```
-python3 -m venv market-qwan-env
+git clone https://github.com/goldenluke/market-qwan.git
+cd market-qwan
+
+---
+
+## 2️⃣ Create Virtual Environment (Recommended: Python 3.12)
+
+python -m venv market-qwan-env
 source market-qwan-env/bin/activate
-```
-
-## Instalar dependências
-
-```
-pip install -r requirements.txt
-```
 
 ---
 
-# ▶ Rodar Backtest Local
+## 3️⃣ Install Dependencies
 
-```
-python main.py
-```
+pip install --upgrade pip
+pip install torch neuralforecast streamlit flask flask-cors numpy pandas plotly scikit-learn networkx hmmlearn statsmodels yfinance
 
 ---
 
-# ▶ Rodar Dashboard Streamlit
+# 🚀 Running the System
 
-```
+## 🧠 Start Training Server
+
+python trainer_server.py
+
+Open in browser:
+
+http://127.0.0.1:5050
+
+---
+
+## 📊 Start Streamlit Dashboard
+
 streamlit run dashboard.py
-```
 
 ---
 
-# ▶ Rodar Dashboard Dash
+# 🔮 Training via CLI (Optional)
 
-```
-python dash_app.py
-```
+python train_forecast.py \
+  --tickers AAPL,MSFT \
+  --input_size 60 \
+  --horizon 10 \
+  --model_name model_test
 
----
+Models are saved in:
 
-# 📈 Métricas Implementadas
-
-- CAGR
-- Sharpe
-- Sortino
-- Alpha
-- Max Drawdown
-- CVaR
-- Rolling Sharpe
-- Rolling Alpha
-- Regime Attribution
+models/model_test.pkl
 
 ---
 
-# ⚠ Limitações Científicas (Honestidade Epistemológica)
+# 🧠 Technical Stack
 
-- Entropia de Shannon não representa significado funcional.
-- HMM assume gaussianidade condicional.
-- Parâmetros alpha e gamma são fenomenológicos.
-- Detecção de regime depende da janela histórica.
-- Não há garantia de universalidade estrutural.
-
-Este projeto é uma **plataforma de pesquisa quantitativa**, não recomendação de investimento.
-
----
-
-# 🎯 Próximos Desenvolvimentos
-
-- Ensemble multi-estratégia
-- Inferência Bayesiana de regimes
-- Deep learning temporal
-- Capital allocation entre engines
-- Deploy SaaS
-- API institucional
+- Python 3.12
+- PyTorch
+- NeuralForecast (NHITS)
+- Streamlit
+- Flask
+- TailwindCSS
+- NetworkX
+- NumPy / Pandas / Plotly
 
 ---
 
-# 👨‍💻 Autor
+# 📈 Roadmap
 
-**Lucas Amaral Dourado**
-Medicina — Universidade Federal do Tocantins
-Ciência da Computação — Centro Universitário Internacional
-Pesquisador em epidemiologia computacional
-
-LinkedIn:
-https://www.linkedin.com/in/lucas-amaral-dourado-b5939b2aa/
+- [ ] Regime-conditioned forecasting
+- [ ] Walk-forward validation
+- [ ] Multi-model ensemble
+- [ ] Risk-adjusted forecast optimization
+- [ ] Docker deployment
+- [ ] Async job monitoring
+- [ ] Cloud training support
 
 ---
 
-# 📜 Licença
+# ⚠️ Notes
 
-Projeto acadêmico / pesquisa quantitativa.
+- Recommended Python version: 3.12
+- Python 3.13 may cause PyTorch instability
+- Training is intentionally decoupled from Streamlit
 
-Uso por conta e risco do usuário.
+---
+
+# 📜 License
+
+MIT License
+
+---
+
+# 👤 Author
+
+Lucas Dourado
+Quantitative Research | Systems Architecture
+
+GitHub: https://github.com/goldenluke
