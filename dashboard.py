@@ -11,7 +11,7 @@ from src.attribution import regime_attribution
 from src.phi_surface import phi_surface
 from src.stress_test import stress_test
 from src.montecarlo_equity import monte_carlo_equity
-
+from src.quant_fund_engine import QuantFundEngine
 
 # ==========================================================
 # CONFIGURAÇÃO

@@ -1,19 +1,65 @@
 import numpy as np
 import pandas as pd
-from hmmlearn.hmm import GaussianHMM
+from scipy.optimize import minimize
 from sklearn.covariance import LedoitWolf
+from hmmlearn.hmm import GaussianHMM
 
+
+# ==========================================================
+# FUNÇÕES AUXILIARES ROBUSTAS
+# ==========================================================
+
+def robust_covariance(returns):
+
+    lw = LedoitWolf().fit(returns)
+    cov = lw.covariance_
+
+    # Eigenvalue clipping
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    eigvals = np.maximum(eigvals, 1e-5)
+    cov_clipped = eigvecs @ np.diag(eigvals) @ eigvecs.T
+
+    return cov_clipped
+
+
+def risk_contribution_entropy(weights, cov):
+
+    portfolio_var = weights @ cov @ weights
+    marginal = cov @ weights
+    RC = weights * marginal / portfolio_var
+
+    RC = np.clip(RC, 1e-8, None)
+    RC = RC / RC.sum()
+
+    return -np.sum(RC * np.log(RC))
+
+
+def cvar(returns, alpha=0.05):
+
+    var = np.percentile(returns, alpha * 100)
+    tail = returns[returns <= var]
+
+    if len(tail) == 0:
+        return 0
+
+    return np.mean(tail)
+
+
+# ==========================================================
+# MODELO QWAN REGIME AWARE ROBUSTO
+# ==========================================================
 
 class RegimeAwareQWAN:
 
     def __init__(
         self,
         returns: pd.DataFrame,
-        n_regimes=3,
-        alpha=0.6,
-        gamma=0.5,
-        target_vol=0.15,
-        lookback_momentum=60
+        n_regimes: int = 3,
+        alpha: float = 0.6,
+        gamma: float = 0.5,
+        target_vol: float = 0.15,
+        lambda_turnover: float = 1.0,
+        cvar_limit: float = 0.05
     ):
 
         self.returns = returns.dropna()
@@ -21,187 +67,189 @@ class RegimeAwareQWAN:
         self.alpha = alpha
         self.gamma = gamma
         self.target_vol = target_vol
-        self.lookback_momentum = lookback_momentum
+        self.lambda_turnover = lambda_turnover
+        self.cvar_limit = cvar_limit
+
+        self.hmm = None
+        self.posterior_probs = None
+        self.hidden_states = None
+        self.regime_weights = {}
+        self.transition_matrix = None
 
         self._fit_hmm()
-        self._compute_posteriors()
-        self._compute_regime_weights()  # 🔥 IMPORTANTE
+        self._optimize_all_regimes()
 
-    # ==========================================================
-    # HMM
-    # ==========================================================
+    # ======================================================
+    # HMM FIT
+    # ======================================================
 
     def _fit_hmm(self):
 
-        self.hmm = GaussianHMM(
+        model = GaussianHMM(
             n_components=self.n_regimes,
-            covariance_type="diag",
-            n_iter=300,
-            random_state=42
+            covariance_type="full",
+            n_iter=200
         )
 
-        self.hmm.fit(self.returns.values)
+        model.fit(self.returns.values)
 
-        self.hidden_states = self.hmm.predict(self.returns.values)
-        self.posterior_probs = self.hmm.predict_proba(self.returns.values)
+        self.hmm = model
+        self.posterior_probs = model.predict_proba(self.returns.values)
+        self.hidden_states = model.predict(self.returns.values)
+        self.transition_matrix = model.transmat_
 
-        self.transition_matrix = self.hmm.transmat_
-        self.start_prob = self.hmm.startprob_
-
-    def _compute_posteriors(self):
-        self.posterior_probs = self.hmm.predict_proba(self.returns.values)
-
-    # ==========================================================
-    # COMPUTAR PESOS POR REGIME
-    # ==========================================================
-
-    def _compute_regime_weights(self):
-
-        self.regime_weights = {}
-
-        for k in range(self.n_regimes):
-            self.regime_weights[k] = self.optimize_for_regime(k)
-
-    # ==========================================================
-    # REGIME ATUAL
-    # ==========================================================
-
-    def get_current_regime(self):
-        return np.argmax(self.posterior_probs[-1])
-
-    def get_current_regime_weights(self):
-        regime = self.get_current_regime()
-        return self.regime_weights[regime]
-
-    # ==========================================================
-    # ENTROPIA
-    # ==========================================================
-
-    def entropy(self, weights):
-        weights = np.clip(weights, 1e-8, None)
-        weights = weights / np.sum(weights)
-        return -np.sum(weights * np.log(weights))
-
-    # ==========================================================
-    # COVARIÂNCIA ROBUSTA
-    # ==========================================================
-
-    def robust_covariance(self, data):
-
-        lw = LedoitWolf()
-        cov = lw.fit(data).covariance_
-
-        eigvals, eigvecs = np.linalg.eigh(cov)
-        eigvals = np.clip(eigvals, 1e-6, None)
-
-        cov = eigvecs @ np.diag(eigvals) @ eigvecs.T
-
-        return cov
-
-    # ==========================================================
-    # MÉDIA BAYESIANA
-    # ==========================================================
-
-    def bayesian_mean(self, data):
-
-        mu_sample = data.mean().values
-        tau = 0.1
-        mu_bayes = mu_sample / (1 + tau)
-
-        return mu_bayes
-
-    # ==========================================================
-    # MOMENTUM
-    # ==========================================================
-
-    def momentum(self, data):
-
-        lookback = min(self.lookback_momentum, len(data))
-        return data.iloc[-lookback:].mean().values
-
-    # ==========================================================
-    # Φ
-    # ==========================================================
+    # ======================================================
+    # FUNCIONAL Φ ROBUSTO
+    # ======================================================
 
     def phi(self, weights, regime):
 
-        mask = self.hidden_states == regime
+        regime_returns = self.returns[
+            self.hidden_states == regime
+        ]
 
-        if np.sum(mask) < 20:
+        if len(regime_returns) < 30:
             return -1e6
 
-        regime_data = self.returns.iloc[mask]
+        cov = robust_covariance(regime_returns.values)
 
-        mu = self.bayesian_mean(regime_data)
-        cov = self.robust_covariance(regime_data)
+        portfolio_returns = regime_returns.values @ weights
 
-        port_return = weights @ mu
-        port_var = weights @ cov @ weights
+        # Ganho ajustado por risco
+        G = np.mean(portfolio_returns) * 252
 
-        H = self.entropy(weights)
+        # Entropia estrutural via contribuição ao risco
+        H = risk_contribution_entropy(weights, cov)
 
-        return port_return - self.alpha * H - 0.5 * port_var
+        # Momentum com lookback móvel
+        lookback = min(60, len(portfolio_returns))
+        mu = np.mean(portfolio_returns[-lookback:]) * 252
 
-    # ==========================================================
-    # PESOS PROBABILÍSTICOS
-    # ==========================================================
+        # Penalização por correlação média
+        corr_penalty = np.mean(np.abs(cov))
+
+        # CVaR
+        cvar_val = cvar(portfolio_returns)
+        cvar_penalty = 0
+        if cvar_val < -self.cvar_limit:
+            cvar_penalty = 10 * abs(cvar_val)
+
+        return (
+            G
+            - self.alpha * H
+            - self.gamma * mu
+            - 0.1 * corr_penalty
+            - cvar_penalty
+        )
+
+    # ======================================================
+    # OTIMIZAÇÃO POR REGIME
+    # ======================================================
+
+    def optimize_for_regime(self, regime, w_prev=None):
+
+        n = self.returns.shape[1]
+        bounds = [(0, 1)] * n
+
+        constraints = ({
+            'type': 'eq',
+            'fun': lambda w: np.sum(w) - 1
+        })
+
+        w0 = np.ones(n) / n
+
+        def objective(w):
+
+            turnover_penalty = 0
+            if w_prev is not None:
+                turnover = np.sum(np.abs(w - w_prev))
+                turnover_penalty = self.lambda_turnover * turnover
+
+            return -self.phi(w, regime) + turnover_penalty
+
+        result = minimize(
+            objective,
+            w0,
+            method='SLSQP',
+            bounds=bounds,
+            constraints=constraints
+        )
+
+        return result.x
+
+    # ======================================================
+    # OTIMIZAR TODOS OS REGIMES
+    # ======================================================
+
+    def _optimize_all_regimes(self):
+
+        w_prev = None
+
+        for k in range(self.n_regimes):
+            w_opt = self.optimize_for_regime(k, w_prev)
+            self.regime_weights[k] = w_opt
+            w_prev = w_opt
+
+    # ======================================================
+    # PESO ATUAL PONDERADO POR POSTERIOR
+    # ======================================================
+
+    def get_current_weights(self):
+
+        posterior_last = self.posterior_probs[-1]
+
+        weights = np.zeros(self.returns.shape[1])
+
+        for k in range(self.n_regimes):
+            weights += posterior_last[k] * self.regime_weights[k]
+
+        # Vol targeting
+        cov_full = robust_covariance(self.returns.values)
+        vol = np.sqrt(weights @ cov_full @ weights) * np.sqrt(252)
+
+        if vol > 0:
+            weights *= self.target_vol / vol
+
+        weights = np.clip(weights, 0, None)
+        weights = weights / weights.sum()
+
+        return weights
+
+    # ======================================================
+    # REGIME ATUAL (SOFT)
+    # ======================================================
+
+    def get_current_regime(self):
+
+        posterior_last = self.posterior_probs[-1]
+        return np.argmax(posterior_last)
+
+
+# ==========================================================
+# PESOS BAYESIANOS MULTI-REGIME
+# ==========================================================
 
     def get_probabilistic_weights(self):
 
-        posterior = self.posterior_probs[-1]
+        # Caso não tenha posterior, usar pesos atuais
+        if not hasattr(self, "posterior_probs"):
+            return self.get_current_weights()
 
-        weights_matrix = np.array(
-            [self.regime_weights[k] for k in range(self.n_regimes)]
-        )
+        if not hasattr(self, "regime_weights"):
+            return self.get_current_weights()
 
-        final_weights = np.sum(
-            posterior[:, None] * weights_matrix,
-            axis=0
-        )
+        posterior_last = self.posterior_probs[-1]
 
-        final_weights = np.clip(final_weights, 0, None)
+        weights = np.zeros_like(self.regime_weights[0])
 
-        if final_weights.sum() == 0:
-            final_weights = np.ones_like(final_weights)
+        for k in range(self.n_regimes):
+            weights += posterior_last[k] * self.regime_weights[k]
 
-        final_weights /= final_weights.sum()
-
-        return final_weights
-
-    # ==========================================================
-    # OTIMIZAÇÃO POR REGIME
-    # ==========================================================
-
-    def optimize_for_regime(self, regime):
-
-        mask = self.hidden_states == regime
-
-        if np.sum(mask) < 20:
-            return np.ones(self.returns.shape[1]) / self.returns.shape[1]
-
-        regime_data = self.returns.iloc[mask]
-
-        mu = self.bayesian_mean(regime_data)
-        cov = self.robust_covariance(regime_data)
-        mom = self.momentum(regime_data)
-
-        score = mu + self.gamma * mom
-
-        inv_cov = np.linalg.pinv(cov)
-
-        raw_weights = inv_cov @ score
-        raw_weights = np.clip(raw_weights, 0, None)
-
-        if raw_weights.sum() == 0:
-            raw_weights = np.ones_like(raw_weights)
-
-        weights = raw_weights / raw_weights.sum()
-
-        # Target Vol Scaling
-        port_vol = np.sqrt(weights @ cov @ weights)
-
-        if port_vol > 0:
-            scale = self.target_vol / port_vol
-            weights = weights * scale
+        # Normalização defensiva
+        weights = np.clip(weights, 0, None)
+        if weights.sum() == 0:
+            weights = np.ones_like(weights) / len(weights)
+        else:
+            weights /= weights.sum()
 
         return weights
