@@ -1,69 +1,142 @@
-Mini-API/Frontend: https://github.com/goldenluke/market-qwan
-
 # 🧠 Market-QWAN
-### Quantitative Workflow for Adaptive Neural Forecasting
 
-Market-QWAN is an experimental quantitative research platform for:
+### Institutional Quantitative Platform for Adaptive Neural Forecasting & Systemic Risk Modeling
 
-- 📈 Portfolio-level neural time series forecasting
-- 🧠 Regime-aware modeling
-- 🌐 Systemic risk monitoring
-- 📊 Interactive financial dashboards
-
-The architecture separates **model training**, **visualization**, and **inference**, ensuring stability and modularity.
+Mini-API / Frontend Repository:
+[https://github.com/goldenluke/market-qwan](https://github.com/goldenluke/market-qwan)
 
 ---
 
-# 🚀 Features
+## 📌 Overview
 
-## 🔮 Neural Forecast
-- NHITS-based neural time series forecasting (NeuralForecast)
-- Configurable:
-  - Tickers
-  - Input window (context size)
-  - Forecast horizon
-- Model persistence (`.pkl`)
-- Portfolio-level expected return estimation
+**Market-QWAN** is an experimental quantitative research platform designed for:
 
-## 🧠 Systemic Risk Monitor
-- Eigenvalue stress (λ_max)
-- Correlation heatmap
-- Rolling market susceptibility
-- Network stress index
+* Portfolio-level neural time series forecasting
+* Regime-aware financial modeling
+* Systemic risk monitoring
+* Interactive institutional dashboards
+* Modular training and inference workflows
 
-## 🌐 External Trainer Interface
-- Flask-based training server
-- Tailwind-powered UI
-- Dynamic model listing
-- Asynchronous training execution
+The system integrates machine learning, econophysics-inspired systemic diagnostics, and modern software architecture to provide a robust research-grade quantitative infrastructure.
 
-## 📊 Streamlit Dashboard
-- Clean visual interface
-- Forecast visualization
-- Model selection dropdown
-- Decoupled from training engine
+The platform is built with strict architectural separation between:
+
+* Model training
+* Inference
+* Visualization
+* API layer
+
+This separation ensures runtime stability, modularity, and scalability.
 
 ---
 
-# 🏗 Architecture
+# 🚀 Core Capabilities
 
-Streamlit (Visualization Only)
-        ↓
-Flask Trainer Server
-        ↓
-train_forecast.py (CLI)
-        ↓
-models/*.pkl
+## 🔮 Neural Forecasting Engine
+
+Market-QWAN uses **NHITS (Neural Hierarchical Interpolation for Time Series)** via NeuralForecast to produce portfolio-level forecasts.
+
+Features:
+
+* Multi-asset forecasting
+* Configurable:
+
+  * Tickers
+  * Input window (context size)
+  * Forecast horizon
+* Model persistence (`.pkl`)
+* Reproducible training via CLI or API
+* Expected return estimation at portfolio level
+
+Designed for research-grade adaptive forecasting workflows.
+
+---
+
+## 🧠 Regime-Aware Modeling (Planned Expansion)
+
+* Hidden Markov Models (HMM)
+* State-dependent return dynamics
+* Regime probability inference
+* Transition matrix diagnostics
+* Future regime-conditioned forecasting
+
+This extends forecasting beyond static time series assumptions.
+
+---
+
+## 🌐 Systemic Risk Monitoring
+
+The platform includes systemic diagnostics inspired by network theory and econophysics:
+
+* Largest eigenvalue stress (λ_max)
+* Correlation heatmap visualization
+* Rolling susceptibility proxy
+* Network density
+* Stress index aggregation
+* Dynamic correlation monitoring
+
+These tools allow monitoring of structural market fragility.
+
+---
+
+## 📊 Institutional Dashboard (Streamlit)
+
+The Streamlit dashboard provides:
+
+* Forecast visualization
+* Historical performance plots
+* Model selection dropdown
+* Correlation network display
+* Clean separation from training engine
+
+It is designed strictly for inference and visualization to avoid training instability.
+
+---
+
+## 🌐 External Training Interface (Flask)
+
+A dedicated Flask-based training server enables:
+
+* Asynchronous training
+* TailwindCSS-powered frontend
+* Dynamic model listing
+* Parameter configuration UI
+* Safe model serialization
+* Background training execution
 
 This prevents:
-- Streamlit crashes during heavy training
-- Torch subprocess conflicts
-- Runtime instability
+
+* Streamlit crashes during heavy training
+* Torch subprocess conflicts
+* Runtime instability
+* Mixed inference-training sessions
+
+---
+
+# 🏗 System Architecture
+
+The system follows a layered architecture:
+
+Streamlit (Visualization Only)
+↓
+Flask Training Server
+↓
+CLI Training Script (`train_forecast.py`)
+↓
+Saved Models (`models/*.pkl`)
+
+This modular architecture ensures:
+
+* Decoupled responsibilities
+* Stable UI operation
+* Clean model lifecycle management
+* Easier scaling to production environments
 
 ---
 
 # 📂 Project Structure
 
+```
 market-qwan/
 │
 ├── dashboard.py              # Streamlit dashboard
@@ -75,9 +148,11 @@ market-qwan/
 ├── src/
 │   ├── qwan_forecast_model.py
 │   ├── qwan_regime_model.py
+│   ├── qwan_systemic_risk.py
 │   └── ...
 ├── requirements.txt
 └── README.md
+```
 
 ---
 
@@ -85,22 +160,30 @@ market-qwan/
 
 ## 1️⃣ Clone Repository
 
+```bash
 git clone https://github.com/goldenluke/market-qwan.git
 cd market-qwan
+```
 
 ---
 
-## 2️⃣ Create Virtual Environment (Recommended: Python 3.12)
+## 2️⃣ Create Virtual Environment
 
+(Recommended: Python 3.12)
+
+```bash
 python -m venv market-qwan-env
 source market-qwan-env/bin/activate
+```
 
 ---
 
 ## 3️⃣ Install Dependencies
 
+```bash
 pip install --upgrade pip
 pip install torch neuralforecast streamlit flask flask-cors numpy pandas plotly scikit-learn networkx hmmlearn statsmodels yfinance
+```
 
 ---
 
@@ -108,64 +191,100 @@ pip install torch neuralforecast streamlit flask flask-cors numpy pandas plotly 
 
 ## 🧠 Start Training Server
 
+```bash
 python trainer_server.py
+```
 
-Open in browser:
+Open:
 
-http://127.0.0.1:5050
+[http://127.0.0.1:5050](http://127.0.0.1:5050)
 
 ---
 
 ## 📊 Start Streamlit Dashboard
 
+```bash
 streamlit run dashboard.py
+```
 
 ---
 
-# 🔮 Training via CLI (Optional)
+# 🔮 CLI Training (Optional Advanced Mode)
 
+```bash
 python train_forecast.py \
   --tickers AAPL,MSFT \
   --input_size 60 \
   --horizon 10 \
   --model_name model_test
+```
 
 Models are saved in:
 
+```
 models/model_test.pkl
+```
 
 ---
 
 # 🧠 Technical Stack
 
-- Python 3.12
-- PyTorch
-- NeuralForecast (NHITS)
-- Streamlit
-- Flask
-- TailwindCSS
-- NetworkX
-- NumPy / Pandas / Plotly
+* Python 3.12
+* PyTorch
+* NeuralForecast (NHITS)
+* Streamlit
+* Flask
+* TailwindCSS
+* NetworkX
+* NumPy
+* Pandas
+* Plotly
+* scikit-learn
+* hmmlearn
+* statsmodels
+* yfinance
 
 ---
 
-# 📈 Roadmap
+# 📈 Research Direction
 
-- [ ] Regime-conditioned forecasting
-- [ ] Walk-forward validation
-- [ ] Multi-model ensemble
-- [ ] Risk-adjusted forecast optimization
-- [ ] Docker deployment
-- [ ] Async job monitoring
-- [ ] Cloud training support
+Market-QWAN is designed as a research-grade platform exploring:
+
+* Adaptive neural forecasting
+* Regime-conditioned return modeling
+* Network-based systemic risk diagnostics
+* Portfolio-level signal aggregation
+* Multi-layer quantitative architecture
+
+It bridges:
+
+* Quantitative finance
+* Neural forecasting
+* Systems architecture
+* Econophysics-inspired systemic analysis
 
 ---
 
-# ⚠️ Notes
+# 🛣 Roadmap
 
-- Recommended Python version: 3.12
-- Python 3.13 may cause PyTorch instability
-- Training is intentionally decoupled from Streamlit
+* [ ] Regime-conditioned neural forecasting
+* [ ] Walk-forward validation framework
+* [ ] Multi-model ensemble integration
+* [ ] Risk-adjusted forecast weighting
+* [ ] Dockerized deployment
+* [ ] Async job queue management
+* [ ] Cloud-based training support
+* [ ] REST inference endpoint
+* [ ] Real-time streaming integration
+
+---
+
+# ⚠️ Technical Notes
+
+* Recommended Python version: **3.12**
+* Python 3.13 may cause PyTorch instability
+* Training is intentionally decoupled from Streamlit
+* Heavy neural training should run via Flask or CLI
 
 ---
 
@@ -178,6 +297,20 @@ MIT License
 # 👤 Author
 
 Lucas Dourado
-Quantitative Research | Systems Architecture
+Quantitative Research | Systems Architecture | Econophysics
 
-GitHub: https://github.com/goldenluke
+GitHub: [https://github.com/goldenluke](https://github.com/goldenluke)
+
+```
+
+---
+
+Se você quiser, posso agora:
+
+- Tornar esse README nível “quant fund institutional”
+- Transformar em whitepaper técnico de 15 páginas
+- Criar versão minimalista premium
+- Ou adicionar badges profissionais e métricas automáticas
+
+Qual direção você quer agora?
+```
